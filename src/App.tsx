@@ -1,14 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
+
+type Perfil = "admin" | "funcionario" | "";
+
+type Peca = {
+  id: string;
+  tipo_peca: string;
+  marca: string;
+  modelo: string;
+  qualidade: string;
+  valor_custo: number;
+  valor_final: number;
+  created_at?: string;
+};
 
 function App() {
   const [logado, setLogado] = useState(false);
-  const [perfil, setPerfil] = useState<"admin" | "funcionario" | "">("");
+  const [perfil, setPerfil] = useState<Perfil>("");
   const [usuario, setUsuario] = useState("");
   const [senha, setSenha] = useState("");
-  const [tela, setTela] = useState("consultar");
-  const [pecas, setPecas] = useState<any[]>([]);
-  const [resultados, setResultados] = useState<any[]>([]);
+  const [tela, setTela] = useState<"consultar" | "cadastrar" | "todos">("consultar");
+
+  const [pecas, setPecas] = useState<Peca[]>([]);
+  const [resultados, setResultados] = useState<Peca[]>([]);
+
   const [tipoPeca, setTipoPeca] = useState("");
   const [marca, setMarca] = useState("");
   const [modelo, setModelo] = useState("");
@@ -22,7 +37,10 @@ function App() {
     valor_final: "",
   });
 
-  const isMobile = window.innerWidth <= 600;
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [pagina, setPagina] = useState(1);
+
+  const porPagina = 5;
 
   function entrar() {
     if (usuario === "marcos" && senha === "1234") {
@@ -50,13 +68,71 @@ function App() {
     setTela("consultar");
   }
 
+  function dinheiro(valor: any) {
+    return Number(valor || 0).toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    });
+  }
+
+  function converterNumero(valor: string) {
+    if (!valor) return 0;
+    return Number(
+      valor
+        .replace("R$", "")
+        .replace(/\s/g, "")
+        .replace(/\./g, "")
+        .replace(",", ".")
+    );
+  }
+
+  function limparFormulario() {
+    setNovaPeca({
+      tipo_peca: "",
+      marca: "",
+      modelo: "",
+      qualidade: "",
+      valor_custo: "",
+      valor_final: "",
+    });
+    setEditandoId(null);
+  }
+
+  function logoMarca(marca: string) {
+    const m = (marca || "").toLowerCase();
+
+    if (m.includes("apple")) return "";
+    if (m.includes("samsung")) return "S";
+    if (m.includes("xiaomi")) return "MI";
+    if (m.includes("motorola")) return "M";
+    if (m.includes("realme")) return "R";
+
+    return (marca || "MM").slice(0, 2).toUpperCase();
+  }
+
+  function corLogo(marca: string) {
+    const m = (marca || "").toLowerCase();
+
+    if (m.includes("apple")) return "#f5f5f5";
+    if (m.includes("samsung")) return "#1d5eff";
+    if (m.includes("xiaomi")) return "#ff6600";
+    if (m.includes("motorola")) return "#24a4ff";
+    if (m.includes("realme")) return "#ffd500";
+
+    return "#ff6600";
+  }
+
   async function carregarPecas() {
     const { data, error } = await supabase
       .from("pecas_precos")
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (error) return alert(error.message);
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
     setPecas(data || []);
   }
 
@@ -75,37 +151,90 @@ function App() {
       ascending: true,
     });
 
-    if (error) return alert(error.message);
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
     setResultados(data || []);
+    setPagina(1);
   }
 
   async function salvarPeca() {
-    const { error } = await supabase.from("pecas_precos").insert([
-      {
-        tipo_peca: novaPeca.tipo_peca,
-        marca: novaPeca.marca,
-        modelo: novaPeca.modelo,
-        qualidade: novaPeca.qualidade,
-        valor_custo: Number(novaPeca.valor_custo),
-        valor_final: Number(novaPeca.valor_final),
-      },
-    ]);
+    const dados = {
+      tipo_peca: novaPeca.tipo_peca.trim(),
+      marca: novaPeca.marca.trim(),
+      modelo: novaPeca.modelo.trim(),
+      qualidade: novaPeca.qualidade.trim(),
+      valor_custo: converterNumero(novaPeca.valor_custo),
+      valor_final: converterNumero(novaPeca.valor_final),
+    };
+
+    if (!dados.tipo_peca || !dados.marca || !dados.modelo || !dados.qualidade) {
+      alert("Preencha tipo, marca, modelo e qualidade.");
+      return;
+    }
+
+    if (editandoId) {
+      const { error } = await supabase
+        .from("pecas_precos")
+        .update(dados)
+        .eq("id", editandoId);
+
+      if (error) return alert(error.message);
+      alert("Preço alterado com sucesso!");
+    } else {
+      const { error } = await supabase.from("pecas_precos").insert([dados]);
+
+      if (error) return alert(error.message);
+      alert("Preço cadastrado com sucesso!");
+    }
+
+    limparFormulario();
+    await carregarPecas();
+    setTela("todos");
+  }
+
+  function editarPeca(peca: Peca) {
+    setEditandoId(peca.id);
+    setTela("cadastrar");
+
+    setNovaPeca({
+      tipo_peca: peca.tipo_peca || "",
+      marca: peca.marca || "",
+      modelo: peca.modelo || "",
+      qualidade: peca.qualidade || "",
+      valor_custo: String(peca.valor_custo || ""),
+      valor_final: String(peca.valor_final || ""),
+    });
+  }
+
+  async function excluirPeca(id: string) {
+    const confirmar = confirm("Deseja excluir essa peça?");
+
+    if (!confirmar) return;
+
+    const { error } = await supabase
+      .from("pecas_precos")
+      .delete()
+      .eq("id", id);
 
     if (error) return alert(error.message);
 
-    alert("Peça cadastrada com sucesso!");
-
-    setNovaPeca({
-      tipo_peca: "",
-      marca: "",
-      modelo: "",
-      qualidade: "",
-      valor_custo: "",
-      valor_final: "",
-    });
-
-    carregarPecas();
+    alert("Peça excluída com sucesso!");
+    await carregarPecas();
+    setResultados((atual) => atual.filter((p) => p.id !== id));
   }
+
+  const listaBase = tela === "consultar" ? resultados : pecas;
+
+  const listaFiltrada = useMemo(() => {
+    return listaBase;
+  }, [listaBase]);
+
+  const totalPaginas = Math.max(1, Math.ceil(listaFiltrada.length / porPagina));
+  const inicio = (pagina - 1) * porPagina;
+  const listaAtual = listaFiltrada.slice(inicio, inicio + porPagina);
 
   if (!logado) {
     return (
@@ -137,145 +266,113 @@ function App() {
     );
   }
 
-  const sidebarStyle = {
-    ...sidebar,
-    width: isMobile ? 132 : 280,
-    padding: isMobile ? 12 : 24,
-  };
-
-  const contentStyle = {
-    ...content,
-    padding: isMobile ? 14 : 32,
-    width: isMobile ? "calc(100vw - 132px)" : "auto",
-  };
-
   return (
     <div style={page}>
-      <aside style={sidebarStyle}>
-        <h2 style={isMobile ? sidebarTitleMobile : sidebarTitle}>
-          Marcos Magazine
-        </h2>
-
+      <aside style={sidebar}>
+        <h2 style={sidebarTitle}>Marcos Magazine</h2>
         <div style={orangeLine}></div>
 
-        <p style={isMobile ? profileTextMobile : profileText}>
-          👤 Perfil:
-          <br />
-          <strong>
-            {perfil === "admin" ? "Administrador" : "Funcionário"}
-          </strong>
-        </p>
+        <div style={profileBox}>
+          <div style={profileIcon}>👤</div>
+          <p style={profileText}>
+            Perfil:
+            <br />
+            <strong>{perfil === "admin" ? "Administrador" : "Funcionário"}</strong>
+          </p>
+        </div>
 
         <button
           style={tela === "consultar" ? activeMenuButton : menuButton}
-          onClick={() => setTela("consultar")}
+          onClick={() => {
+            setTela("consultar");
+            setPagina(1);
+          }}
         >
-          🔎 Consultar Peças
+          <span style={menuIcon}>⌕</span>
+          <span>
+            Consultar
+            <br />
+            Peças
+          </span>
         </button>
 
         {perfil === "admin" && (
           <>
             <button
               style={tela === "cadastrar" ? activeMenuButton : menuButton}
-              onClick={() => setTela("cadastrar")}
+              onClick={() => {
+                limparFormulario();
+                setTela("cadastrar");
+              }}
             >
-              ➕ Cadastrar Preços
+              <span style={menuIcon}>+</span>
+              <span>
+                Cadastrar
+                <br />
+                Preços
+              </span>
             </button>
 
             <button
               style={tela === "todos" ? activeMenuButton : menuButton}
-              onClick={() => setTela("todos")}
+              onClick={() => {
+                setTela("todos");
+                setPagina(1);
+              }}
             >
-              📋 Todos os Preços
+              <span style={menuIcon}>▦</span>
+              <span>
+                Todos os
+                <br />
+                Preços
+              </span>
             </button>
           </>
         )}
 
         <button style={logoutButton} onClick={sair}>
-          🚪 Sair
+          <span style={exitIcon}>↪</span>
+          <span>Sair</span>
         </button>
       </aside>
 
-      <main style={contentStyle}>
-        <h1 style={isMobile ? mainTitleMobile : mainTitle}>
-          Consulta de Preços de Peças
-        </h1>
+      <main style={content}>
+        <h1 style={mainTitle}>Consulta de Preços de Peças</h1>
 
         {tela === "consultar" && (
-          <>
-            <section style={card}>
-              <h3 style={sectionTitle}>Pesquisar Peça</h3>
+          <section style={searchCard}>
+            <input
+              style={input}
+              placeholder="Tipo. Ex: Tela"
+              value={tipoPeca}
+              onChange={(e) => setTipoPeca(e.target.value)}
+            />
 
-              <div style={isMobile ? searchGridMobile : searchGrid}>
-                <input
-                  style={input}
-                  placeholder="Tipo. Ex: Tela"
-                  value={tipoPeca}
-                  onChange={(e) => setTipoPeca(e.target.value)}
-                />
+            <input
+              style={input}
+              placeholder="Marca. Ex: Apple"
+              value={marca}
+              onChange={(e) => setMarca(e.target.value)}
+            />
 
-                <input
-                  style={input}
-                  placeholder="Marca. Ex: Apple"
-                  value={marca}
-                  onChange={(e) => setMarca(e.target.value)}
-                />
+            <input
+              style={input}
+              placeholder="Modelo. Ex: iPhone 11"
+              value={modelo}
+              onChange={(e) => setModelo(e.target.value)}
+            />
 
-                <input
-                  style={input}
-                  placeholder="Modelo. Ex: iPhone 11"
-                  value={modelo}
-                  onChange={(e) => setModelo(e.target.value)}
-                />
-
-                <button style={button} onClick={pesquisarPecas}>
-                  Pesquisar
-                </button>
-              </div>
-            </section>
-
-            <h2 style={resultTitle}>Resultados da Pesquisa</h2>
-
-            {resultados.length === 0 ? (
-              <div style={emptyCard}>Nenhuma peça encontrada ainda.</div>
-            ) : (
-              resultados.map((peca) => (
-                <div
-                  key={peca.id}
-                  style={isMobile ? resultCardMobile : resultCard}
-                >
-                  <div>
-                    <h2 style={pieceTitle}>
-                      {peca.tipo_peca} - {peca.marca} {peca.modelo}
-                    </h2>
-
-                    <p style={pieceText}>
-                      Qualidade:{" "}
-                      <strong style={{ color: "#ff6600" }}>
-                        {peca.qualidade}
-                      </strong>
-                    </p>
-
-                    {perfil === "admin" && (
-                      <p style={pieceText}>Custo: R$ {peca.valor_custo}</p>
-                    )}
-                  </div>
-
-                  <div style={priceBox}>
-                    <p style={priceLabel}>Valor final:</p>
-                    <h1 style={isMobile ? priceMobile : price}>
-                      R$ {peca.valor_final}
-                    </h1>
-                  </div>
-                </div>
-              ))
-            )}
-          </>
+            <button style={button} onClick={pesquisarPecas}>
+              Buscar
+            </button>
+          </section>
         )}
 
         {tela === "cadastrar" && perfil === "admin" && (
-          <section style={card}>
-            <h3 style={sectionTitle}>Cadastrar Novo Preço</h3>
+          <section style={searchCard}>
+            <h2 style={sectionTitle}>
+              {editandoId ? "Alterar Preço" : "Cadastrar Novo Preço"}
+            </h2>
 
             <input
               style={input}
@@ -306,7 +403,7 @@ function App() {
 
             <input
               style={input}
-              placeholder="Qualidade. Ex: OLED"
+              placeholder="Qualidade. Ex: OLED, LCD, Incell"
               value={novaPeca.qualidade}
               onChange={(e) =>
                 setNovaPeca({ ...novaPeca, qualidade: e.target.value })
@@ -332,36 +429,99 @@ function App() {
             />
 
             <button style={button} onClick={salvarPeca}>
-              Salvar Preço
+              {editandoId ? "Salvar Alteração" : "Salvar Preço"}
             </button>
           </section>
         )}
 
-        {tela === "todos" && perfil === "admin" && (
+        {(tela === "todos" || tela === "consultar") && (
           <>
-            <h2 style={resultTitle}>Todos os Preços Cadastrados</h2>
+            <h2 style={subTitle}>
+              {tela === "todos" ? "Todos os Preços Cadastrados" : "Resultados"}
+            </h2>
 
-            {pecas.map((peca) => (
-              <div
-                key={peca.id}
-                style={isMobile ? resultCardMobile : resultCard}
-              >
-                <div>
-                  <h2 style={pieceTitle}>
-                    {peca.tipo_peca} - {peca.marca} {peca.modelo}
-                  </h2>
-                  <p style={pieceText}>Qualidade: {peca.qualidade}</p>
-                  <p style={pieceText}>Custo: R$ {peca.valor_custo}</p>
-                </div>
+            {listaAtual.length === 0 ? (
+              <div style={emptyCard}>Nenhuma peça encontrada.</div>
+            ) : (
+              <div style={listBox}>
+                {listaAtual.map((peca) => (
+                  <div key={peca.id} style={pieceCard}>
+                    <div
+                      style={{
+                        ...brandLogo,
+                        background: corLogo(peca.marca),
+                        color: (peca.marca || "").toLowerCase().includes("apple")
+                          ? "#111"
+                          : "#fff",
+                      }}
+                    >
+                      {logoMarca(peca.marca)}
+                    </div>
 
-                <div style={priceBox}>
-                  <p style={priceLabel}>Valor final:</p>
-                  <h1 style={isMobile ? priceMobile : price}>
-                    R$ {peca.valor_final}
-                  </h1>
-                </div>
+                    <div style={infoBox}>
+                      <h3 style={pieceTitle}>
+                        {peca.tipo_peca} - {peca.marca} {peca.modelo}
+                      </h3>
+
+                      <p style={pieceText}>
+                        Qualidade:{" "}
+                        <strong style={orangeText}>{peca.qualidade}</strong>
+                      </p>
+
+                      {perfil === "admin" && (
+                        <p style={pieceText}>Custo: {dinheiro(peca.valor_custo)}</p>
+                      )}
+                    </div>
+
+                    <div style={divider}></div>
+
+                    <div style={priceArea}>
+                      <p style={priceLabel}>Valor final:</p>
+                      <h2 style={price}>{dinheiro(peca.valor_final)}</h2>
+
+                      {perfil === "admin" && (
+                        <div style={actionBox}>
+                          <button style={editButton} onClick={() => editarPeca(peca)}>
+                            ✎
+                          </button>
+
+                          <button
+                            style={deleteButton}
+                            onClick={() => excluirPeca(peca.id)}
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+
+            <div style={pagination}>
+              <button
+                style={pageButton}
+                disabled={pagina === 1}
+                onClick={() => setPagina(pagina - 1)}
+              >
+                Anterior
+              </button>
+
+              <p style={pageText}>
+                Página <strong style={orangeText}>{pagina}</strong> de {totalPaginas}
+              </p>
+
+              <button
+                style={nextButton}
+                disabled={pagina === totalPaginas}
+                onClick={() => setPagina(pagina + 1)}
+              >
+                Próxima
+              </button>
+
+              <p style={totalText}>Total de {listaFiltrada.length} registros</p>
+            </div>
           </>
         )}
       </main>
@@ -370,171 +530,280 @@ function App() {
 }
 
 const page = {
-  background: "linear-gradient(135deg, #090909, #151515)",
+  background: "#050505",
   color: "#fff",
   minHeight: "100vh",
-  fontFamily: "Arial",
+  fontFamily: "Arial, sans-serif",
   display: "flex",
   overflowX: "hidden" as const,
-};
-
-const loginPage = {
-  background: "radial-gradient(circle at top, #1f1f1f, #050505)",
-  color: "#fff",
-  minHeight: "100vh",
-  fontFamily: "Arial",
-  display: "flex",
-  flexDirection: "column" as const,
-  alignItems: "center",
-  justifyContent: "center",
-  padding: 20,
-  overflowX: "hidden" as const,
-};
-
-const loginTitle = {
-  color: "#ff6600",
-  fontSize: 44,
-  margin: 0,
-  fontWeight: "900",
-  textAlign: "center" as const,
-};
-
-const loginSubtitle = {
-  color: "#fff",
-  fontSize: 20,
-  marginTop: 10,
-  marginBottom: 25,
-  textAlign: "center" as const,
-};
-
-const loginCard = {
-  background: "linear-gradient(180deg, #1d1d1d, #121212)",
-  padding: 28,
-  borderRadius: 16,
-  width: "100%",
-  maxWidth: 460,
-  border: "1px solid #333",
-  boxShadow: "0 20px 50px rgba(0,0,0,0.45)",
-};
-
-const loginInput = {
-  width: "100%",
-  padding: 16,
-  marginBottom: 14,
-  borderRadius: 8,
-  border: "1px solid #333",
-  background: "#101010",
-  color: "#fff",
-  boxSizing: "border-box" as const,
-  fontSize: 16,
-};
-
-const loginButton = {
-  width: "100%",
-  background: "linear-gradient(135deg, #ff6600, #ff7a18)",
-  color: "#fff",
-  border: "none",
-  padding: "15px",
-  borderRadius: 8,
-  cursor: "pointer",
-  fontWeight: "bold",
-  fontSize: 16,
 };
 
 const sidebar = {
-  background: "linear-gradient(180deg, #101010, #080808)",
+  width: 118,
+  background: "linear-gradient(180deg, #111, #050505)",
+  borderRight: "1px solid #292929",
   minHeight: "100vh",
+  padding: "24px 8px",
   boxSizing: "border-box" as const,
-  borderRight: "1px solid #333",
   flexShrink: 0,
 };
 
 const sidebarTitle = {
   color: "#ff6600",
-  fontSize: 28,
+  fontSize: 20,
   fontWeight: "900",
+  lineHeight: 1.08,
   margin: 0,
-};
-
-const sidebarTitleMobile = {
-  color: "#ff6600",
-  fontSize: 22,
-  fontWeight: "900",
-  margin: 0,
-  lineHeight: 1.15,
 };
 
 const orangeLine = {
-  width: "100%",
   height: 2,
+  width: "100%",
   background: "#ff6600",
-  marginTop: 16,
-  marginBottom: 22,
+  margin: "18px 0 22px",
+};
+
+const profileBox = {
+  textAlign: "center" as const,
+  marginBottom: 24,
+};
+
+const profileIcon = {
+  fontSize: 23,
 };
 
 const profileText = {
-  color: "#ddd",
-  marginBottom: 25,
+  fontSize: 12,
+  lineHeight: 1.3,
+  margin: "6px 0 0",
+  color: "#fff",
 };
 
-const profileTextMobile = {
-  color: "#ddd",
-  marginBottom: 18,
-  fontSize: 14,
-  lineHeight: 1.4,
+const menuButton = {
+  width: "100%",
+  minHeight: 64,
+  background: "rgba(255,255,255,0.02)",
+  color: "#fff",
+  border: "1px solid #2b2b2b",
+  borderRadius: 10,
+  padding: 7,
+  marginBottom: 10,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  gap: 7,
+  fontSize: 11,
+  lineHeight: 1.15,
+  textAlign: "left" as const,
+};
+
+const activeMenuButton = {
+  ...menuButton,
+  border: "1px solid #ff6600",
+  boxShadow: "inset 3px 0 0 #ff6600",
+};
+
+const menuIcon = {
+  color: "#ff6600",
+  fontSize: 23,
+  fontWeight: "bold",
+};
+
+const logoutButton = {
+  ...menuButton,
+  color: "#ff4444",
+  marginTop: 18,
+};
+
+const exitIcon = {
+  color: "#ff6600",
+  fontSize: 20,
 };
 
 const content = {
   flex: 1,
+  padding: "24px 10px 22px",
   boxSizing: "border-box" as const,
-  overflowX: "hidden" as const,
+  maxWidth: "calc(100vw - 118px)",
 };
 
 const mainTitle = {
   color: "#fff",
-  fontSize: 34,
-  marginTop: 0,
-  marginBottom: 24,
+  fontSize: 20,
+  lineHeight: 1.08,
+  textAlign: "center" as const,
+  margin: "0 auto 18px",
+  fontWeight: "800",
 };
 
-const mainTitleMobile = {
+const subTitle = {
+  color: "#c9c9c9",
+  fontSize: 15,
+  textAlign: "center" as const,
+  margin: "0 0 15px",
+  fontWeight: "400",
+};
+
+const listBox = {
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 10,
+};
+
+const pieceCard = {
+  background: "linear-gradient(180deg, #141414, #0c0c0c)",
+  border: "1px solid #2b2b2b",
+  borderRadius: 11,
+  padding: 9,
+  display: "grid",
+  gridTemplateColumns: "44px 1fr 1px 90px",
+  gap: 8,
+  alignItems: "center",
+  minHeight: 88,
+};
+
+const brandLogo = {
+  width: 38,
+  height: 38,
+  borderRadius: 9,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontWeight: "900",
+  fontSize: 13,
+  justifySelf: "center",
+};
+
+const infoBox = {
+  minWidth: 0,
+};
+
+const pieceTitle = {
+  margin: "0 0 7px",
+  fontSize: 12,
+  lineHeight: 1.15,
+  fontWeight: "800",
+};
+
+const pieceText = {
+  margin: "4px 0",
+  fontSize: 10.5,
+  color: "#d6d6d6",
+};
+
+const orangeText = {
+  color: "#ff6600",
+};
+
+const divider = {
+  width: 1,
+  height: 58,
+  background: "#303030",
+};
+
+const priceArea = {
+  textAlign: "right" as const,
+};
+
+const priceLabel = {
+  margin: 0,
+  fontSize: 10,
+  fontWeight: "bold",
+};
+
+const price = {
+  margin: "4px 0 8px",
+  color: "#ff6600",
+  fontSize: 15,
+  whiteSpace: "nowrap" as const,
+};
+
+const actionBox = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 6,
+};
+
+const editButton = {
+  width: 30,
+  height: 30,
+  borderRadius: 7,
+  background: "rgba(255,255,255,0.04)",
   color: "#fff",
-  fontSize: 24,
-  lineHeight: 1.1,
-  marginTop: 0,
-  marginBottom: 20,
+  border: "1px solid #4a4a4a",
+  fontSize: 15,
+  cursor: "pointer",
+};
+
+const deleteButton = {
+  width: 30,
+  height: 30,
+  borderRadius: 7,
+  background: "rgba(255,0,0,0.08)",
+  color: "#ff6b6b",
+  border: "1px solid #d32f2f",
+  fontSize: 14,
+  cursor: "pointer",
+};
+
+const pagination = {
+  borderTop: "1px solid #222",
+  marginTop: 18,
+  paddingTop: 15,
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr 1fr",
+  alignItems: "center",
+  gap: 6,
   textAlign: "center" as const,
 };
 
-const card = {
-  background: "linear-gradient(180deg, #1f1f1f, #171717)",
-  padding: 18,
-  borderRadius: 12,
-  marginBottom: 22,
+const pageButton = {
+  background: "transparent",
+  color: "#ddd",
   border: "1px solid #333",
-  boxSizing: "border-box" as const,
+  borderRadius: 7,
+  padding: "10px 6px",
+  fontSize: 12,
+};
+
+const nextButton = {
+  background: "#ff6600",
+  color: "#fff",
+  border: "none",
+  borderRadius: 7,
+  padding: "10px 6px",
+  fontSize: 12,
+};
+
+const pageText = {
+  fontSize: 12,
+};
+
+const totalText = {
+  gridColumn: "1 / 4",
+  color: "#bfbfbf",
+  margin: 0,
+  fontSize: 12,
+};
+
+const searchCard = {
+  background: "#111",
+  border: "1px solid #333",
+  borderRadius: 11,
+  padding: 12,
+  marginBottom: 15,
 };
 
 const sectionTitle = {
   marginTop: 0,
-  fontSize: 20,
-};
-
-const searchGrid = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr 1fr 180px",
-  gap: 14,
-};
-
-const searchGridMobile = {
-  display: "grid",
-  gridTemplateColumns: "1fr",
-  gap: 10,
+  textAlign: "center" as const,
+  fontSize: 16,
 };
 
 const input = {
   width: "100%",
-  padding: 13,
+  padding: 11,
+  marginBottom: 10,
   borderRadius: 8,
   border: "1px solid #333",
   background: "#111",
@@ -544,133 +813,83 @@ const input = {
 };
 
 const button = {
-  background: "linear-gradient(135deg, #ff6600, #ff7a18)",
+  width: "100%",
+  background: "#ff6600",
   color: "#fff",
   border: "none",
-  padding: "14px 18px",
+  padding: 12,
   borderRadius: 8,
-  cursor: "pointer",
   fontWeight: "bold",
-  fontSize: 15,
-  width: "100%",
-};
-
-const menuButton = {
-  width: "100%",
-  background: "transparent",
-  color: "#fff",
-  border: "1px solid #222",
-  padding: "13px 10px",
-  borderRadius: 8,
-  cursor: "pointer",
-  marginBottom: 10,
-  textAlign: "left" as const,
   fontSize: 14,
-  lineHeight: 1.25,
-};
-
-const activeMenuButton = {
-  width: "100%",
-  background: "linear-gradient(135deg, #ff6600, #ff7a18)",
-  color: "#fff",
-  border: "none",
-  padding: "13px 10px",
-  borderRadius: 8,
-  cursor: "pointer",
-  marginBottom: 10,
-  textAlign: "left" as const,
-  fontSize: 14,
-  lineHeight: 1.25,
-  fontWeight: "bold",
-};
-
-const logoutButton = {
-  width: "100%",
-  background: "transparent",
-  color: "#ff3333",
-  border: "1px solid #222",
-  padding: "13px 10px",
-  borderRadius: 8,
-  cursor: "pointer",
-  marginTop: 18,
-  textAlign: "left" as const,
-  fontSize: 14,
-};
-
-const resultTitle = {
-  color: "#fff",
-  fontSize: 22,
-  textAlign: "center" as const,
 };
 
 const emptyCard = {
-  background: "#1f1f1f",
-  color: "#aaa",
-  padding: 20,
-  borderRadius: 10,
+  background: "#111",
   border: "1px solid #333",
+  padding: 18,
+  borderRadius: 10,
+  color: "#aaa",
   textAlign: "center" as const,
 };
 
-const resultCard = {
-  background: "linear-gradient(180deg, #242424, #1a1a1a)",
-  padding: 22,
-  borderRadius: 12,
-  marginBottom: 14,
-  border: "1px solid #333",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 20,
-};
-
-const resultCardMobile = {
-  background: "linear-gradient(180deg, #242424, #1a1a1a)",
-  padding: 18,
-  borderRadius: 12,
-  marginBottom: 14,
-  border: "1px solid #333",
-  display: "grid",
-  gridTemplateColumns: "1fr 120px",
-  gap: 12,
-  alignItems: "center",
-  boxSizing: "border-box" as const,
-};
-
-const pieceTitle = {
-  margin: 0,
-  fontSize: 20,
-  lineHeight: 1.25,
-};
-
-const pieceText = {
-  color: "#ddd",
-  margin: "8px 0",
-  fontSize: 15,
-};
-
-const priceBox = {
-  textAlign: "right" as const,
-};
-
-const priceLabel = {
+const loginPage = {
+  background: "#050505",
   color: "#fff",
+  minHeight: "100vh",
+  fontFamily: "Arial",
+  display: "flex",
+  flexDirection: "column" as const,
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 20,
+};
+
+const loginTitle = {
+  color: "#ff6600",
+  fontSize: 42,
   margin: 0,
+  fontWeight: "900",
+  textAlign: "center" as const,
+};
+
+const loginSubtitle = {
+  color: "#fff",
+  fontSize: 18,
+  marginTop: 8,
+  marginBottom: 25,
+  textAlign: "center" as const,
+};
+
+const loginCard = {
+  background: "#111",
+  padding: 25,
+  borderRadius: 16,
+  width: "100%",
+  maxWidth: 420,
+  border: "1px solid #333",
+};
+
+const loginInput = {
+  width: "100%",
+  padding: 15,
+  marginBottom: 14,
+  borderRadius: 8,
+  border: "1px solid #333",
+  background: "#111",
+  color: "#fff",
+  boxSizing: "border-box" as const,
+  fontSize: 16,
+};
+
+const loginButton = {
+  width: "100%",
+  background: "#ff6600",
+  color: "#fff",
+  border: "none",
+  padding: 15,
+  borderRadius: 8,
   fontWeight: "bold",
-  fontSize: 14,
-};
-
-const price = {
-  color: "#ff6600",
-  fontSize: 34,
-  margin: "5px 0 0",
-};
-
-const priceMobile = {
-  color: "#ff6600",
-  fontSize: 25,
-  margin: "5px 0 0",
-  whiteSpace: "nowrap" as const,
+  fontSize: 16,
 };
 
 export default App;
