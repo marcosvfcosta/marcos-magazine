@@ -118,18 +118,44 @@ function App() {
   const [marca, setMarca] = useState("");
   const [modelo, setModelo] = useState("");
 
-  const [novaPeca, setNovaPeca] = useState(formularioVazio());
+  // Controla a opção de digitar o modelo manualmente.
+  const [digitarModelo, setDigitarModelo] = useState(false);
 
-  const [editandoId, setEditandoId] =
-    useState<string | null>(null);
+  const [novaPeca, setNovaPeca] = useState(formularioVazio());
+  const [editandoId, setEditandoId] = useState<string | null>(null);
 
   const [pagina, setPagina] = useState(1);
   const [carregando, setCarregando] = useState(false);
 
   const porPagina = 5;
 
+  // Lista os modelos já cadastrados no banco.
+  // Não é necessário criar uma nova tabela.
+  const modelosDisponiveis = useMemo(() => {
+    const encontrados = new Map<string, string>();
+
+    for (const peca of pecas) {
+      if (
+        marca &&
+        normalizar(peca.marca) !== normalizar(marca)
+      ) {
+        continue;
+      }
+
+      const nome = (peca.modelo || "").trim();
+      const chave = normalizar(nome);
+
+      if (nome && !encontrados.has(chave)) {
+        encontrados.set(chave, nome);
+      }
+    }
+
+    return Array.from(encontrados.values()).sort((a, b) =>
+      a.localeCompare(b, "pt-BR", { numeric: true })
+    );
+  }, [pecas, marca]);
+
   function entrar() {
-    // Login original, mantido nesta atualização.
     if (usuario === "marcos" && senha === "1234") {
       setPerfil("admin");
     } else if (
@@ -153,6 +179,8 @@ function App() {
     setSenha("");
     setTela("consultar");
     setResultados([]);
+    setModelo("");
+    setDigitarModelo(false);
   }
 
   function limparFormulario() {
@@ -179,6 +207,8 @@ function App() {
   }, []);
 
   async function pesquisarPecas() {
+    const modeloEscolhido = normalizar(modelo);
+
     setCarregando(true);
 
     try {
@@ -196,18 +226,17 @@ function App() {
         (peca) => {
           const tipoOk =
             !tipoPeca.trim() ||
-            normalizar(peca.tipo_peca).includes(
-              normalizar(tipoPeca)
-            );
+            normalizar(peca.tipo_peca) ===
+              normalizar(tipoPeca);
 
           const marcaOk =
             !marca.trim() ||
             normalizar(peca.marca) === normalizar(marca);
 
-          // Pesquisa exata do modelo.
+          // Comparação exata entre modelos.
           const modeloOk =
-            !modelo.trim() ||
-            normalizar(peca.modelo) === normalizar(modelo);
+            !modeloEscolhido ||
+            normalizar(peca.modelo) === modeloEscolhido;
 
           return tipoOk && marcaOk && modeloOk;
         }
@@ -311,6 +340,7 @@ function App() {
     }
 
     alert("Peça excluída com sucesso!");
+
     await carregarPecas();
 
     setResultados((atual) =>
@@ -321,17 +351,12 @@ function App() {
   const listaBase =
     tela === "consultar" ? resultados : pecas;
 
-  const listaFiltrada = useMemo(
-    () => listaBase,
-    [listaBase]
-  );
-
   const totalPaginas = Math.max(
     1,
-    Math.ceil(listaFiltrada.length / porPagina)
+    Math.ceil(listaBase.length / porPagina)
   );
 
-  const listaAtual = listaFiltrada.slice(
+  const listaAtual = listaBase.slice(
     (pagina - 1) * porPagina,
     pagina * porPagina
   );
@@ -475,58 +500,106 @@ function App() {
 
         {tela === "consultar" && (
           <section style={searchCard}>
-            {/* TIPO DE PEÇA: AGORA É SELEÇÃO */}
+            {/* TIPO DE PEÇA */}
             <select
               style={input}
               value={tipoPeca}
-              onChange={(e) => setTipoPeca(e.target.value)}
+              onChange={(e) =>
+                setTipoPeca(e.target.value)
+              }
             >
               <option value="">
                 Todos os tipos de peças
               </option>
 
               {TIPOS.map((tipo) => (
-                <option
-                  key={tipo}
-                  value={tipo}
-                >
+                <option key={tipo} value={tipo}>
                   {tipo}
                 </option>
               ))}
             </select>
 
-            {/* MARCA: SELEÇÃO */}
+            {/* MARCA */}
             <select
               style={input}
               value={marca}
-              onChange={(e) => setMarca(e.target.value)}
+              onChange={(e) => {
+                setMarca(e.target.value);
+                setModelo("");
+                setDigitarModelo(false);
+              }}
             >
               <option value="">
                 Todas as marcas
               </option>
 
               {MARCAS.map((m) => (
-                <option
-                  key={m}
-                  value={m}
-                >
+                <option key={m} value={m}>
                   {m}
                 </option>
               ))}
             </select>
 
-            {/* MODELO: DIGITAÇÃO MANUAL */}
-            <input
+            {/* MODELO COM SETINHA */}
+            <select
               style={input}
-              placeholder="Modelo exato. Ex: iPhone 11"
-              value={modelo}
-              onChange={(e) => setModelo(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  void pesquisarPecas();
+              value={digitarModelo ? "__digitar__" : modelo}
+              onChange={(e) => {
+                const valor = e.target.value;
+
+                if (valor === "__digitar__") {
+                  setDigitarModelo(true);
+                  setModelo("");
+                } else {
+                  setDigitarModelo(false);
+                  setModelo(valor);
                 }
               }}
-            />
+            >
+              <option value="">
+                Todos os modelos
+              </option>
+
+              {modelosDisponiveis.map((nome) => (
+                <option key={nome} value={nome}>
+                  {nome}
+                </option>
+              ))}
+
+              <option value="__digitar__">
+                ✏️ Digitar modelo
+              </option>
+            </select>
+
+            {/* CAMPO PARA DIGITAR */}
+            {digitarModelo && (
+              <div>
+                <input
+                  style={input}
+                  placeholder="Digite o modelo exato"
+                  value={modelo}
+                  onChange={(e) =>
+                    setModelo(e.target.value)
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      void pesquisarPecas();
+                    }
+                  }}
+                />
+
+                <button
+                  type="button"
+                  style={secondaryButton}
+                  onClick={() => {
+                    setDigitarModelo(false);
+                    setModelo("");
+                  }}
+                >
+                  Voltar para lista de modelos
+                </button>
+              </div>
+            )}
 
             <button
               style={button}
@@ -602,9 +675,10 @@ function App() {
               ))}
             </select>
 
+            {/* CADASTRO MANUAL DO MODELO */}
             <input
               style={input}
-              placeholder="Modelo. Ex: iPhone 11"
+              placeholder="Modelo. Ex: iPhone 11 Pro Max"
               value={novaPeca.modelo}
               onChange={(e) =>
                 setNovaPeca({
@@ -679,8 +753,7 @@ function App() {
           </section>
         )}
 
-        {(tela === "todos" ||
-          tela === "consultar") && (
+        {(tela === "todos" || tela === "consultar") && (
           <>
             <h2 style={subTitle}>
               {tela === "todos"
@@ -749,7 +822,10 @@ function App() {
                         <div style={actionBox}>
                           <button
                             style={editButton}
-                            onClick={() => editarPeca(peca)}
+                            onClick={() =>
+                              editarPeca(peca)
+                            }
+                            title="Editar"
                           >
                             ✎
                           </button>
@@ -759,6 +835,7 @@ function App() {
                             onClick={() =>
                               void excluirPeca(peca.id)
                             }
+                            title="Excluir"
                           >
                             🗑
                           </button>
@@ -800,8 +877,7 @@ function App() {
               </button>
 
               <p style={totalText}>
-                Total de{" "}
-                {listaFiltrada.length} registros
+                Total de {listaBase.length} registros
               </p>
             </div>
           </>
@@ -810,6 +886,10 @@ function App() {
     </div>
   );
 }
+
+// =====================================
+// ESTILOS — LARANJA E PRETO
+// =====================================
 
 const page = {
   background: "#050505",
@@ -933,8 +1013,7 @@ const listBox = {
 };
 
 const pieceCard = {
-  background:
-    "linear-gradient(180deg, #141414, #0c0c0c)",
+  background: "linear-gradient(180deg, #141414, #0c0c0c)",
   border: "1px solid #2b2b2b",
   borderRadius: 11,
   padding: 9,
@@ -1047,6 +1126,7 @@ const pageButton = {
   borderRadius: 7,
   padding: "10px 6px",
   fontSize: 12,
+  cursor: "pointer",
 };
 
 const nextButton = {
@@ -1056,6 +1136,7 @@ const nextButton = {
   borderRadius: 7,
   padding: "10px 6px",
   fontSize: 12,
+  cursor: "pointer",
 };
 
 const pageText = {
@@ -1107,6 +1188,18 @@ const button = {
   cursor: "pointer",
 };
 
+const secondaryButton = {
+  width: "100%",
+  background: "#222",
+  color: "#fff",
+  border: "1px solid #555",
+  padding: 10,
+  borderRadius: 8,
+  fontSize: 12,
+  cursor: "pointer",
+  marginBottom: 10,
+};
+
 const emptyCard = {
   background: "#111",
   border: "1px solid #333",
@@ -1151,6 +1244,7 @@ const loginCard = {
   width: "100%",
   maxWidth: 420,
   border: "1px solid #333",
+  boxSizing: "border-box" as const,
 };
 
 const loginInput = {
