@@ -1,7 +1,9 @@
+
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
 
 type Perfil = "admin" | "funcionario" | "";
+type Tela = "consultar" | "cadastrar" | "todos";
 
 type Peca = {
   id: string;
@@ -14,12 +16,100 @@ type Peca = {
   created_at?: string;
 };
 
+const MARCAS = [
+  "Apple",
+  "Samsung",
+  "Xiaomi",
+  "Motorola",
+  "Realme",
+];
+
+const QUALIDADES = [
+  "OLED",
+  "LCD",
+  "Premium",
+  "Original Nacional",
+];
+
+const TIPOS = [
+  "Tela",
+  "Bateria",
+  "Conector de carga",
+  "Câmera",
+  "Tampa traseira",
+  "Flex",
+  "Alto-falante",
+  "Microfone",
+  "Película",
+  "Outro",
+];
+
+function normalizar(valor: string) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function dinheiro(valor: number | string) {
+  return Number(valor || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
+function converterNumero(valor: string) {
+  const limpo = valor
+    .replace(/R\$/gi, "")
+    .replace(/\s/g, "");
+
+  return limpo.includes(",")
+    ? Number(limpo.replace(/\./g, "").replace(",", "."))
+    : Number(limpo);
+}
+
+function logoMarca(marca: string) {
+  const m = normalizar(marca);
+
+  if (m.includes("apple")) return "";
+  if (m.includes("samsung")) return "S";
+  if (m.includes("xiaomi")) return "MI";
+  if (m.includes("motorola")) return "M";
+  if (m.includes("realme")) return "R";
+
+  return (marca || "MM").slice(0, 2).toUpperCase();
+}
+
+function corLogo(marca: string) {
+  const m = normalizar(marca);
+
+  if (m.includes("apple")) return "#f5f5f5";
+  if (m.includes("samsung")) return "#1d5eff";
+  if (m.includes("xiaomi")) return "#ff6600";
+  if (m.includes("motorola")) return "#24a4ff";
+  if (m.includes("realme")) return "#ffd500";
+
+  return "#ff6600";
+}
+
+const formularioVazio = () => ({
+  tipo_peca: "",
+  marca: "",
+  modelo: "",
+  qualidade: "",
+  valor_custo: "",
+  valor_final: "",
+});
+
 function App() {
   const [logado, setLogado] = useState(false);
   const [perfil, setPerfil] = useState<Perfil>("");
   const [usuario, setUsuario] = useState("");
   const [senha, setSenha] = useState("");
-  const [tela, setTela] = useState<"consultar" | "cadastrar" | "todos">("consultar");
+
+  const [tela, setTela] = useState<Tela>("consultar");
 
   const [pecas, setPecas] = useState<Peca[]>([]);
   const [resultados, setResultados] = useState<Peca[]>([]);
@@ -28,36 +118,32 @@ function App() {
   const [marca, setMarca] = useState("");
   const [modelo, setModelo] = useState("");
 
-  const [novaPeca, setNovaPeca] = useState({
-    tipo_peca: "",
-    marca: "",
-    modelo: "",
-    qualidade: "",
-    valor_custo: "",
-    valor_final: "",
-  });
+  const [novaPeca, setNovaPeca] = useState(formularioVazio());
 
-  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [editandoId, setEditandoId] =
+    useState<string | null>(null);
+
   const [pagina, setPagina] = useState(1);
+  const [carregando, setCarregando] = useState(false);
 
   const porPagina = 5;
 
   function entrar() {
+    // Login original, mantido nesta atualização.
     if (usuario === "marcos" && senha === "1234") {
       setPerfil("admin");
-      setLogado(true);
-      setTela("consultar");
-      return;
-    }
-
-    if (usuario === "funcionario" && senha === "1234") {
+    } else if (
+      usuario === "funcionario" &&
+      senha === "1234"
+    ) {
       setPerfil("funcionario");
-      setLogado(true);
-      setTela("consultar");
+    } else {
+      alert("Usuário ou senha incorretos");
       return;
     }
 
-    alert("Usuário ou senha incorretos");
+    setLogado(true);
+    setTela("consultar");
   }
 
   function sair() {
@@ -66,60 +152,12 @@ function App() {
     setUsuario("");
     setSenha("");
     setTela("consultar");
-  }
-
-  function dinheiro(valor: any) {
-    return Number(valor || 0).toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-  }
-
-  function converterNumero(valor: string) {
-    if (!valor) return 0;
-    return Number(
-      valor
-        .replace("R$", "")
-        .replace(/\s/g, "")
-        .replace(/\./g, "")
-        .replace(",", ".")
-    );
+    setResultados([]);
   }
 
   function limparFormulario() {
-    setNovaPeca({
-      tipo_peca: "",
-      marca: "",
-      modelo: "",
-      qualidade: "",
-      valor_custo: "",
-      valor_final: "",
-    });
+    setNovaPeca(formularioVazio());
     setEditandoId(null);
-  }
-
-  function logoMarca(marca: string) {
-    const m = (marca || "").toLowerCase();
-
-    if (m.includes("apple")) return "";
-    if (m.includes("samsung")) return "S";
-    if (m.includes("xiaomi")) return "MI";
-    if (m.includes("motorola")) return "M";
-    if (m.includes("realme")) return "R";
-
-    return (marca || "MM").slice(0, 2).toUpperCase();
-  }
-
-  function corLogo(marca: string) {
-    const m = (marca || "").toLowerCase();
-
-    if (m.includes("apple")) return "#f5f5f5";
-    if (m.includes("samsung")) return "#1d5eff";
-    if (m.includes("xiaomi")) return "#ff6600";
-    if (m.includes("motorola")) return "#24a4ff";
-    if (m.includes("realme")) return "#ffd500";
-
-    return "#ff6600";
   }
 
   async function carregarPecas() {
@@ -133,31 +171,53 @@ function App() {
       return;
     }
 
-    setPecas(data || []);
+    setPecas((data || []) as Peca[]);
   }
 
   useEffect(() => {
-    carregarPecas();
+    void carregarPecas();
   }, []);
 
   async function pesquisarPecas() {
-    let query = supabase.from("pecas_precos").select("*");
+    setCarregando(true);
 
-    if (tipoPeca) query = query.ilike("tipo_peca", `%${tipoPeca}%`);
-    if (marca) query = query.ilike("marca", `%${marca}%`);
-    if (modelo) query = query.ilike("modelo", `%${modelo}%`);
+    try {
+      const { data, error } = await supabase
+        .from("pecas_precos")
+        .select("*")
+        .order("valor_final", { ascending: true });
 
-    const { data, error } = await query.order("valor_final", {
-      ascending: true,
-    });
+      if (error) {
+        alert(error.message);
+        return;
+      }
 
-    if (error) {
-      alert(error.message);
-      return;
+      const filtrados = ((data || []) as Peca[]).filter(
+        (peca) => {
+          const tipoOk =
+            !tipoPeca.trim() ||
+            normalizar(peca.tipo_peca).includes(
+              normalizar(tipoPeca)
+            );
+
+          const marcaOk =
+            !marca.trim() ||
+            normalizar(peca.marca) === normalizar(marca);
+
+          // Pesquisa exata do modelo.
+          const modeloOk =
+            !modelo.trim() ||
+            normalizar(peca.modelo) === normalizar(modelo);
+
+          return tipoOk && marcaOk && modeloOk;
+        }
+      );
+
+      setResultados(filtrados);
+      setPagina(1);
+    } finally {
+      setCarregando(false);
     }
-
-    setResultados(data || []);
-    setPagina(1);
   }
 
   async function salvarPeca() {
@@ -170,8 +230,25 @@ function App() {
       valor_final: converterNumero(novaPeca.valor_final),
     };
 
-    if (!dados.tipo_peca || !dados.marca || !dados.modelo || !dados.qualidade) {
+    if (
+      !dados.tipo_peca ||
+      !dados.marca ||
+      !dados.modelo ||
+      !dados.qualidade
+    ) {
       alert("Preencha tipo, marca, modelo e qualidade.");
+      return;
+    }
+
+    if (
+      !novaPeca.valor_custo.trim() ||
+      !novaPeca.valor_final.trim() ||
+      !Number.isFinite(dados.valor_custo) ||
+      !Number.isFinite(dados.valor_final) ||
+      dados.valor_custo < 0 ||
+      dados.valor_final < 0
+    ) {
+      alert("Informe valores de custo e final válidos.");
       return;
     }
 
@@ -181,17 +258,28 @@ function App() {
         .update(dados)
         .eq("id", editandoId);
 
-      if (error) return alert(error.message);
+      if (error) {
+        alert(error.message);
+        return;
+      }
+
       alert("Preço alterado com sucesso!");
     } else {
-      const { error } = await supabase.from("pecas_precos").insert([dados]);
+      const { error } = await supabase
+        .from("pecas_precos")
+        .insert([dados]);
 
-      if (error) return alert(error.message);
+      if (error) {
+        alert(error.message);
+        return;
+      }
+
       alert("Preço cadastrado com sucesso!");
     }
 
     limparFormulario();
     await carregarPecas();
+    setPagina(1);
     setTela("todos");
   }
 
@@ -204,43 +292,58 @@ function App() {
       marca: peca.marca || "",
       modelo: peca.modelo || "",
       qualidade: peca.qualidade || "",
-      valor_custo: String(peca.valor_custo || ""),
-      valor_final: String(peca.valor_final || ""),
+      valor_custo: String(peca.valor_custo ?? ""),
+      valor_final: String(peca.valor_final ?? ""),
     });
   }
 
   async function excluirPeca(id: string) {
-    const confirmar = confirm("Deseja excluir essa peça?");
-
-    if (!confirmar) return;
+    if (!confirm("Deseja excluir essa peça?")) return;
 
     const { error } = await supabase
       .from("pecas_precos")
       .delete()
       .eq("id", id);
 
-    if (error) return alert(error.message);
+    if (error) {
+      alert(error.message);
+      return;
+    }
 
     alert("Peça excluída com sucesso!");
     await carregarPecas();
-    setResultados((atual) => atual.filter((p) => p.id !== id));
+
+    setResultados((atual) =>
+      atual.filter((p) => p.id !== id)
+    );
   }
 
-  const listaBase = tela === "consultar" ? resultados : pecas;
+  const listaBase =
+    tela === "consultar" ? resultados : pecas;
 
-  const listaFiltrada = useMemo(() => {
-    return listaBase;
-  }, [listaBase]);
+  const listaFiltrada = useMemo(
+    () => listaBase,
+    [listaBase]
+  );
 
-  const totalPaginas = Math.max(1, Math.ceil(listaFiltrada.length / porPagina));
-  const inicio = (pagina - 1) * porPagina;
-  const listaAtual = listaFiltrada.slice(inicio, inicio + porPagina);
+  const totalPaginas = Math.max(
+    1,
+    Math.ceil(listaFiltrada.length / porPagina)
+  );
+
+  const listaAtual = listaFiltrada.slice(
+    (pagina - 1) * porPagina,
+    pagina * porPagina
+  );
 
   if (!logado) {
     return (
       <div style={loginPage}>
         <h1 style={loginTitle}>Marcos Magazine</h1>
-        <h2 style={loginSubtitle}>Consulta de Preços de Peças</h2>
+
+        <h2 style={loginSubtitle}>
+          Consulta de Preços de Peças
+        </h2>
 
         <div style={loginCard}>
           <input
@@ -256,9 +359,15 @@ function App() {
             type="password"
             value={senha}
             onChange={(e) => setSenha(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") entrar();
+            }}
           />
 
-          <button style={loginButton} onClick={entrar}>
+          <button
+            style={loginButton}
+            onClick={entrar}
+          >
             Entrar
           </button>
         </div>
@@ -269,20 +378,32 @@ function App() {
   return (
     <div style={page}>
       <aside style={sidebar}>
-        <h2 style={sidebarTitle}>Marcos Magazine</h2>
-        <div style={orangeLine}></div>
+        <h2 style={sidebarTitle}>
+          Marcos Magazine
+        </h2>
+
+        <div style={orangeLine} />
 
         <div style={profileBox}>
           <div style={profileIcon}>👤</div>
+
           <p style={profileText}>
             Perfil:
             <br />
-            <strong>{perfil === "admin" ? "Administrador" : "Funcionário"}</strong>
+            <strong>
+              {perfil === "admin"
+                ? "Administrador"
+                : "Funcionário"}
+            </strong>
           </p>
         </div>
 
         <button
-          style={tela === "consultar" ? activeMenuButton : menuButton}
+          style={
+            tela === "consultar"
+              ? activeMenuButton
+              : menuButton
+          }
           onClick={() => {
             setTela("consultar");
             setPagina(1);
@@ -299,7 +420,11 @@ function App() {
         {perfil === "admin" && (
           <>
             <button
-              style={tela === "cadastrar" ? activeMenuButton : menuButton}
+              style={
+                tela === "cadastrar"
+                  ? activeMenuButton
+                  : menuButton
+              }
               onClick={() => {
                 limparFormulario();
                 setTela("cadastrar");
@@ -314,7 +439,11 @@ function App() {
             </button>
 
             <button
-              style={tela === "todos" ? activeMenuButton : menuButton}
+              style={
+                tela === "todos"
+                  ? activeMenuButton
+                  : menuButton
+              }
               onClick={() => {
                 setTela("todos");
                 setPagina(1);
@@ -330,40 +459,81 @@ function App() {
           </>
         )}
 
-        <button style={logoutButton} onClick={sair}>
+        <button
+          style={logoutButton}
+          onClick={sair}
+        >
           <span style={exitIcon}>↪</span>
           <span>Sair</span>
         </button>
       </aside>
 
       <main style={content}>
-        <h1 style={mainTitle}>Consulta de Preços de Peças</h1>
+        <h1 style={mainTitle}>
+          Consulta de Preços de Peças
+        </h1>
 
         {tela === "consultar" && (
           <section style={searchCard}>
-            <input
+            {/* TIPO DE PEÇA: AGORA É SELEÇÃO */}
+            <select
               style={input}
-              placeholder="Tipo. Ex: Tela"
               value={tipoPeca}
               onChange={(e) => setTipoPeca(e.target.value)}
-            />
+            >
+              <option value="">
+                Todos os tipos de peças
+              </option>
 
-            <input
+              {TIPOS.map((tipo) => (
+                <option
+                  key={tipo}
+                  value={tipo}
+                >
+                  {tipo}
+                </option>
+              ))}
+            </select>
+
+            {/* MARCA: SELEÇÃO */}
+            <select
               style={input}
-              placeholder="Marca. Ex: Apple"
               value={marca}
               onChange={(e) => setMarca(e.target.value)}
-            />
+            >
+              <option value="">
+                Todas as marcas
+              </option>
 
+              {MARCAS.map((m) => (
+                <option
+                  key={m}
+                  value={m}
+                >
+                  {m}
+                </option>
+              ))}
+            </select>
+
+            {/* MODELO: DIGITAÇÃO MANUAL */}
             <input
               style={input}
-              placeholder="Modelo. Ex: iPhone 11"
+              placeholder="Modelo exato. Ex: iPhone 11"
               value={modelo}
               onChange={(e) => setModelo(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  void pesquisarPecas();
+                }
+              }}
             />
 
-            <button style={button} onClick={pesquisarPecas}>
-              Buscar
+            <button
+              style={button}
+              disabled={carregando}
+              onClick={() => void pesquisarPecas()}
+            >
+              {carregando ? "Buscando..." : "Buscar"}
             </button>
           </section>
         )}
@@ -371,86 +541,171 @@ function App() {
         {tela === "cadastrar" && perfil === "admin" && (
           <section style={searchCard}>
             <h2 style={sectionTitle}>
-              {editandoId ? "Alterar Preço" : "Cadastrar Novo Preço"}
+              {editandoId
+                ? "Alterar Preço"
+                : "Cadastrar Novo Preço"}
             </h2>
 
-            <input
+            <select
               style={input}
-              placeholder="Tipo da peça. Ex: Tela"
               value={novaPeca.tipo_peca}
               onChange={(e) =>
-                setNovaPeca({ ...novaPeca, tipo_peca: e.target.value })
+                setNovaPeca({
+                  ...novaPeca,
+                  tipo_peca: e.target.value,
+                })
               }
-            />
+            >
+              <option value="">
+                Selecione o tipo de peça
+              </option>
 
-            <input
+              {[
+                ...new Set([
+                  ...TIPOS,
+                  ...(novaPeca.tipo_peca
+                    ? [novaPeca.tipo_peca]
+                    : []),
+                ]),
+              ].map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+
+            <select
               style={input}
-              placeholder="Marca. Ex: Apple"
               value={novaPeca.marca}
               onChange={(e) =>
-                setNovaPeca({ ...novaPeca, marca: e.target.value })
+                setNovaPeca({
+                  ...novaPeca,
+                  marca: e.target.value,
+                })
               }
-            />
+            >
+              <option value="">
+                Selecione a marca
+              </option>
+
+              {[
+                ...new Set([
+                  ...MARCAS,
+                  ...(novaPeca.marca
+                    ? [novaPeca.marca]
+                    : []),
+                ]),
+              ].map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
 
             <input
               style={input}
               placeholder="Modelo. Ex: iPhone 11"
               value={novaPeca.modelo}
               onChange={(e) =>
-                setNovaPeca({ ...novaPeca, modelo: e.target.value })
+                setNovaPeca({
+                  ...novaPeca,
+                  modelo: e.target.value,
+                })
               }
             />
 
-            <input
+            <select
               style={input}
-              placeholder="Qualidade. Ex: OLED, LCD, Incell"
               value={novaPeca.qualidade}
               onChange={(e) =>
-                setNovaPeca({ ...novaPeca, qualidade: e.target.value })
+                setNovaPeca({
+                  ...novaPeca,
+                  qualidade: e.target.value,
+                })
               }
-            />
+            >
+              <option value="">
+                Selecione a qualidade
+              </option>
+
+              {[
+                ...new Set([
+                  ...QUALIDADES,
+                  ...(novaPeca.qualidade
+                    ? [novaPeca.qualidade]
+                    : []),
+                ]),
+              ].map((q) => (
+                <option key={q} value={q}>
+                  {q}
+                </option>
+              ))}
+            </select>
 
             <input
               style={input}
               placeholder="Valor de custo"
+              inputMode="decimal"
               value={novaPeca.valor_custo}
               onChange={(e) =>
-                setNovaPeca({ ...novaPeca, valor_custo: e.target.value })
+                setNovaPeca({
+                  ...novaPeca,
+                  valor_custo: e.target.value,
+                })
               }
             />
 
             <input
               style={input}
               placeholder="Valor final"
+              inputMode="decimal"
               value={novaPeca.valor_final}
               onChange={(e) =>
-                setNovaPeca({ ...novaPeca, valor_final: e.target.value })
+                setNovaPeca({
+                  ...novaPeca,
+                  valor_final: e.target.value,
+                })
               }
             />
 
-            <button style={button} onClick={salvarPeca}>
-              {editandoId ? "Salvar Alteração" : "Salvar Preço"}
+            <button
+              style={button}
+              onClick={() => void salvarPeca()}
+            >
+              {editandoId
+                ? "Salvar Alteração"
+                : "Salvar Preço"}
             </button>
           </section>
         )}
 
-        {(tela === "todos" || tela === "consultar") && (
+        {(tela === "todos" ||
+          tela === "consultar") && (
           <>
             <h2 style={subTitle}>
-              {tela === "todos" ? "Todos os Preços Cadastrados" : "Resultados"}
+              {tela === "todos"
+                ? "Todos os Preços Cadastrados"
+                : "Resultados"}
             </h2>
 
             {listaAtual.length === 0 ? (
-              <div style={emptyCard}>Nenhuma peça encontrada.</div>
+              <div style={emptyCard}>
+                Nenhuma peça encontrada.
+              </div>
             ) : (
               <div style={listBox}>
                 {listaAtual.map((peca) => (
-                  <div key={peca.id} style={pieceCard}>
+                  <div
+                    key={peca.id}
+                    style={pieceCard}
+                  >
                     <div
                       style={{
                         ...brandLogo,
                         background: corLogo(peca.marca),
-                        color: (peca.marca || "").toLowerCase().includes("apple")
+                        color: normalizar(
+                          peca.marca
+                        ).includes("apple")
                           ? "#111"
                           : "#fff",
                       }}
@@ -460,34 +715,50 @@ function App() {
 
                     <div style={infoBox}>
                       <h3 style={pieceTitle}>
-                        {peca.tipo_peca} - {peca.marca} {peca.modelo}
+                        {peca.tipo_peca} -{" "}
+                        {peca.marca} {peca.modelo}
                       </h3>
 
                       <p style={pieceText}>
                         Qualidade:{" "}
-                        <strong style={orangeText}>{peca.qualidade}</strong>
+                        <strong style={orangeText}>
+                          {peca.qualidade}
+                        </strong>
                       </p>
 
                       {perfil === "admin" && (
-                        <p style={pieceText}>Custo: {dinheiro(peca.valor_custo)}</p>
+                        <p style={pieceText}>
+                          Custo:{" "}
+                          {dinheiro(peca.valor_custo)}
+                        </p>
                       )}
                     </div>
 
-                    <div style={divider}></div>
+                    <div style={divider} />
 
                     <div style={priceArea}>
-                      <p style={priceLabel}>Valor final:</p>
-                      <h2 style={price}>{dinheiro(peca.valor_final)}</h2>
+                      <p style={priceLabel}>
+                        Valor final:
+                      </p>
+
+                      <h2 style={price}>
+                        {dinheiro(peca.valor_final)}
+                      </h2>
 
                       {perfil === "admin" && (
                         <div style={actionBox}>
-                          <button style={editButton} onClick={() => editarPeca(peca)}>
+                          <button
+                            style={editButton}
+                            onClick={() => editarPeca(peca)}
+                          >
                             ✎
                           </button>
 
                           <button
                             style={deleteButton}
-                            onClick={() => excluirPeca(peca.id)}
+                            onClick={() =>
+                              void excluirPeca(peca.id)
+                            }
                           >
                             🗑
                           </button>
@@ -503,24 +774,35 @@ function App() {
               <button
                 style={pageButton}
                 disabled={pagina === 1}
-                onClick={() => setPagina(pagina - 1)}
+                onClick={() =>
+                  setPagina((p) => p - 1)
+                }
               >
                 Anterior
               </button>
 
               <p style={pageText}>
-                Página <strong style={orangeText}>{pagina}</strong> de {totalPaginas}
+                Página{" "}
+                <strong style={orangeText}>
+                  {pagina}
+                </strong>{" "}
+                de {totalPaginas}
               </p>
 
               <button
                 style={nextButton}
                 disabled={pagina === totalPaginas}
-                onClick={() => setPagina(pagina + 1)}
+                onClick={() =>
+                  setPagina((p) => p + 1)
+                }
               >
                 Próxima
               </button>
 
-              <p style={totalText}>Total de {listaFiltrada.length} registros</p>
+              <p style={totalText}>
+                Total de{" "}
+                {listaFiltrada.length} registros
+              </p>
             </div>
           </>
         )}
@@ -651,7 +933,8 @@ const listBox = {
 };
 
 const pieceCard = {
-  background: "linear-gradient(180deg, #141414, #0c0c0c)",
+  background:
+    "linear-gradient(180deg, #141414, #0c0c0c)",
   border: "1px solid #2b2b2b",
   borderRadius: 11,
   padding: 9,
@@ -821,6 +1104,7 @@ const button = {
   borderRadius: 8,
   fontWeight: "bold",
   fontSize: 14,
+  cursor: "pointer",
 };
 
 const emptyCard = {
@@ -890,6 +1174,7 @@ const loginButton = {
   borderRadius: 8,
   fontWeight: "bold",
   fontSize: 16,
+  cursor: "pointer",
 };
 
 export default App;
