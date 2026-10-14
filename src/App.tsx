@@ -29,6 +29,11 @@ const QUALIDADES = [
   "LCD",
   "Premium",
   "Original Nacional",
+  "Peça genuína",
+  "Peça não genuína",
+  "Subplaca tipo c",
+  "Subplaca V8",
+  "Conector",
 ];
 
 const TIPOS = [
