@@ -16,13 +16,10 @@ type Peca = {
   created_at?: string;
 };
 
-const MARCAS = [
-  "Apple",
-  "Samsung",
-  "Xiaomi",
-  "Motorola",
-  "Realme",
-];
+const EMAIL_ADMIN = "marcosvinicius95pnnn@gmail.com";
+const EMAIL_FUNCIONARIO = "funcionario@marcosmagazine.com.br";
+
+const MARCAS = ["Apple", "Samsung", "Xiaomi", "Motorola", "Realme"];
 
 const QUALIDADES = [
   "OLED",
@@ -66,10 +63,7 @@ function dinheiro(valor: number | string) {
 }
 
 function converterNumero(valor: string) {
-  const limpo = valor
-    .replace(/R\$/gi, "")
-    .replace(/\s/g, "");
-
+  const limpo = valor.replace(/R\$/gi, "").replace(/\s/g, "");
   return limpo.includes(",")
     ? Number(limpo.replace(/\./g, "").replace(",", "."))
     : Number(limpo);
@@ -77,25 +71,21 @@ function converterNumero(valor: string) {
 
 function logoMarca(marca: string) {
   const m = normalizar(marca);
-
   if (m.includes("apple")) return "";
   if (m.includes("samsung")) return "S";
   if (m.includes("xiaomi")) return "MI";
   if (m.includes("motorola")) return "M";
   if (m.includes("realme")) return "R";
-
   return (marca || "MM").slice(0, 2).toUpperCase();
 }
 
 function corLogo(marca: string) {
   const m = normalizar(marca);
-
   if (m.includes("apple")) return "#f5f5f5";
   if (m.includes("samsung")) return "#1d5eff";
   if (m.includes("xiaomi")) return "#ff6600";
   if (m.includes("motorola")) return "#24a4ff";
   if (m.includes("realme")) return "#ffd500";
-
   return "#ff6600";
 }
 
@@ -108,34 +98,29 @@ const formularioVazio = () => ({
   valor_final: "",
 });
 
-function App() {
+export default function App() {
+  const [verificando, setVerificando] = useState(true);
   const [logado, setLogado] = useState(false);
   const [perfil, setPerfil] = useState<Perfil>("");
   const [usuario, setUsuario] = useState("");
   const [senha, setSenha] = useState("");
-
+  const [entrando, setEntrando] = useState(false);
   const [tela, setTela] = useState<Tela>("consultar");
 
   const [pecas, setPecas] = useState<Peca[]>([]);
   const [resultados, setResultados] = useState<Peca[]>([]);
-
   const [tipoPeca, setTipoPeca] = useState("");
   const [marca, setMarca] = useState("");
   const [modelo, setModelo] = useState("");
-
-  // Controla a opção de digitar o modelo manualmente.
   const [digitarModelo, setDigitarModelo] = useState(false);
 
   const [novaPeca, setNovaPeca] = useState(formularioVazio());
   const [editandoId, setEditandoId] = useState<string | null>(null);
-
   const [pagina, setPagina] = useState(1);
   const [carregando, setCarregando] = useState(false);
 
   const porPagina = 5;
 
-  // Lista os modelos já cadastrados no banco.
-  // Não é necessário criar uma nova tabela.
   const modelosDisponiveis = useMemo(() => {
     const encontrados = new Map<string, string>();
 
@@ -160,29 +145,153 @@ function App() {
     );
   }, [pecas, marca]);
 
-  function entrar() {
-    if (usuario === "marcos" && senha === "1234") {
-      setPerfil("admin");
-    } else if (
-      usuario === "funcionario" &&
-      senha === "1234"
-    ) {
-      setPerfil("funcionario");
-    } else {
-      alert("Usuário ou senha incorretos");
+  async function carregarPerfil(usuarioId: string) {
+    const { data, error } = await supabase
+      .from("perfis")
+      .select("perfil")
+      .eq("usuario_id", usuarioId)
+      .single();
+
+    if (error || !data) {
+      throw new Error(
+        "Seu usuário não possui um perfil autorizado. Verifique a tabela perfis no Supabase."
+      );
+    }
+
+    if (data.perfil !== "admin" && data.perfil !== "funcionario") {
+      throw new Error("Perfil de acesso inválido.");
+    }
+
+    return data.perfil as Perfil;
+  }
+
+  async function carregarPecas() {
+    const { data, error } = await supabase
+      .from("pecas_precos")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      alert("Erro ao carregar peças: " + error.message);
       return;
     }
 
-    setLogado(true);
-    setTela("consultar");
+    setPecas((data || []) as Peca[]);
   }
 
-  function sair() {
+  useEffect(() => {
+    let ativo = true;
+
+    async function verificarSessao() {
+      try {
+        const { data, error } = await supabase.auth.getUser();
+
+        if (error || !data.user) {
+          if (ativo) {
+            setLogado(false);
+            setPerfil("");
+          }
+          return;
+        }
+
+        const perfilEncontrado = await carregarPerfil(data.user.id);
+
+        if (ativo) {
+          setPerfil(perfilEncontrado);
+          setLogado(true);
+          await carregarPecas();
+        }
+      } catch (erro) {
+        console.error(erro);
+        if (ativo) {
+          setLogado(false);
+          setPerfil("");
+        }
+      } finally {
+        if (ativo) setVerificando(false);
+      }
+    }
+
+    void verificarSessao();
+
+    return () => {
+      ativo = false;
+    };
+  }, []);
+
+  async function entrar() {
+    if (entrando) return;
+
+    if (!usuario.trim() || !senha) {
+      alert("Informe o usuário e a senha.");
+      return;
+    }
+
+    setEntrando(true);
+
+    try {
+      const nome = usuario.trim().toLowerCase().replace(/^@/, "");
+
+      let email = usuario.trim();
+
+      if (nome === "admin") {
+        email = EMAIL_ADMIN;
+      } else if (nome === "funcionario") {
+        email = EMAIL_FUNCIONARIO;
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password: senha,
+      });
+
+      if (error || !data.user) {
+        alert("Usuário ou senha incorretos.");
+        return;
+      }
+
+      let perfilEncontrado: Perfil;
+
+      try {
+        perfilEncontrado = await carregarPerfil(data.user.id);
+      } catch (erro) {
+        await supabase.auth.signOut();
+        throw erro;
+      }
+
+      setPerfil(perfilEncontrado);
+      setLogado(true);
+      setTela("consultar");
+      setSenha("");
+      setResultados([]);
+      setPagina(1);
+
+      await carregarPecas();
+    } catch (erro) {
+      alert(
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível entrar."
+      );
+    } finally {
+      setEntrando(false);
+    }
+  }
+
+  async function sair() {
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      alert("Erro ao sair: " + error.message);
+      return;
+    }
+
     setLogado(false);
     setPerfil("");
     setUsuario("");
     setSenha("");
     setTela("consultar");
+    setPecas([]);
     setResultados([]);
     setModelo("");
     setDigitarModelo(false);
@@ -193,27 +302,8 @@ function App() {
     setEditandoId(null);
   }
 
-  async function carregarPecas() {
-    const { data, error } = await supabase
-      .from("pecas_precos")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    setPecas((data || []) as Peca[]);
-  }
-
-  useEffect(() => {
-    void carregarPecas();
-  }, []);
-
   async function pesquisarPecas() {
     const modeloEscolhido = normalizar(modelo);
-
     setCarregando(true);
 
     try {
@@ -227,25 +317,21 @@ function App() {
         return;
       }
 
-      const filtrados = ((data || []) as Peca[]).filter(
-        (peca) => {
-          const tipoOk =
-            !tipoPeca.trim() ||
-            normalizar(peca.tipo_peca) ===
-              normalizar(tipoPeca);
+      const filtrados = ((data || []) as Peca[]).filter((peca) => {
+        const tipoOk =
+          !tipoPeca.trim() ||
+          normalizar(peca.tipo_peca) === normalizar(tipoPeca);
 
-          const marcaOk =
-            !marca.trim() ||
-            normalizar(peca.marca) === normalizar(marca);
+        const marcaOk =
+          !marca.trim() ||
+          normalizar(peca.marca) === normalizar(marca);
 
-          // Comparação exata entre modelos.
-          const modeloOk =
-            !modeloEscolhido ||
-            normalizar(peca.modelo) === modeloEscolhido;
+        const modeloOk =
+          !modeloEscolhido ||
+          normalizar(peca.modelo) === modeloEscolhido;
 
-          return tipoOk && marcaOk && modeloOk;
-        }
-      );
+        return tipoOk && marcaOk && modeloOk;
+      });
 
       setResultados(filtrados);
       setPagina(1);
@@ -255,6 +341,11 @@ function App() {
   }
 
   async function salvarPeca() {
+    if (perfil !== "admin") {
+      alert("Somente o administrador pode cadastrar ou alterar preços.");
+      return;
+    }
+
     const dados = {
       tipo_peca: novaPeca.tipo_peca.trim(),
       marca: novaPeca.marca.trim(),
@@ -318,6 +409,8 @@ function App() {
   }
 
   function editarPeca(peca: Peca) {
+    if (perfil !== "admin") return;
+
     setEditandoId(peca.id);
     setTela("cadastrar");
 
@@ -332,6 +425,11 @@ function App() {
   }
 
   async function excluirPeca(id: string) {
+    if (perfil !== "admin") {
+      alert("Acesso não autorizado.");
+      return;
+    }
+
     if (!confirm("Deseja excluir essa peça?")) return;
 
     const { error } = await supabase
@@ -348,13 +446,10 @@ function App() {
 
     await carregarPecas();
 
-    setResultados((atual) =>
-      atual.filter((p) => p.id !== id)
-    );
+    setResultados((atual) => atual.filter((p) => p.id !== id));
   }
 
-  const listaBase =
-    tela === "consultar" ? resultados : pecas;
+  const listaBase = tela === "consultar" ? resultados : pecas;
 
   const totalPaginas = Math.max(
     1,
@@ -365,6 +460,15 @@ function App() {
     (pagina - 1) * porPagina,
     pagina * porPagina
   );
+
+  if (verificando) {
+    return (
+      <div style={loginPage}>
+        <h1 style={loginTitle}>Marcos Magazine</h1>
+        <p>Verificando acesso...</p>
+      </div>
+    );
+  }
 
   if (!logado) {
     return (
@@ -378,7 +482,8 @@ function App() {
         <div style={loginCard}>
           <input
             style={loginInput}
-            placeholder="Usuário"
+            placeholder="@admin ou @funcionario"
+            autoComplete="username"
             value={usuario}
             onChange={(e) => setUsuario(e.target.value)}
           />
@@ -387,18 +492,20 @@ function App() {
             style={loginInput}
             placeholder="Senha"
             type="password"
+            autoComplete="current-password"
             value={senha}
             onChange={(e) => setSenha(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") entrar();
+              if (e.key === "Enter") void entrar();
             }}
           />
 
           <button
             style={loginButton}
-            onClick={entrar}
+            onClick={() => void entrar()}
+            disabled={entrando}
           >
-            Entrar
+            {entrando ? "Entrando..." : "Entrar"}
           </button>
         </div>
       </div>
@@ -408,9 +515,7 @@ function App() {
   return (
     <div style={page}>
       <aside style={sidebar}>
-        <h2 style={sidebarTitle}>
-          Marcos Magazine
-        </h2>
+        <h2 style={sidebarTitle}>Marcos Magazine</h2>
 
         <div style={orangeLine} />
 
@@ -421,18 +526,14 @@ function App() {
             Perfil:
             <br />
             <strong>
-              {perfil === "admin"
-                ? "Administrador"
-                : "Funcionário"}
+              {perfil === "admin" ? "Administrador" : "Funcionário"}
             </strong>
           </p>
         </div>
 
         <button
           style={
-            tela === "consultar"
-              ? activeMenuButton
-              : menuButton
+            tela === "consultar" ? activeMenuButton : menuButton
           }
           onClick={() => {
             setTela("consultar");
@@ -451,9 +552,7 @@ function App() {
           <>
             <button
               style={
-                tela === "cadastrar"
-                  ? activeMenuButton
-                  : menuButton
+                tela === "cadastrar" ? activeMenuButton : menuButton
               }
               onClick={() => {
                 limparFormulario();
@@ -469,11 +568,7 @@ function App() {
             </button>
 
             <button
-              style={
-                tela === "todos"
-                  ? activeMenuButton
-                  : menuButton
-              }
+              style={tela === "todos" ? activeMenuButton : menuButton}
               onClick={() => {
                 setTela("todos");
                 setPagina(1);
@@ -491,7 +586,7 @@ function App() {
 
         <button
           style={logoutButton}
-          onClick={sair}
+          onClick={() => void sair()}
         >
           <span style={exitIcon}>↪</span>
           <span>Sair</span>
@@ -505,17 +600,12 @@ function App() {
 
         {tela === "consultar" && (
           <section style={searchCard}>
-            {/* TIPO DE PEÇA */}
             <select
               style={input}
               value={tipoPeca}
-              onChange={(e) =>
-                setTipoPeca(e.target.value)
-              }
+              onChange={(e) => setTipoPeca(e.target.value)}
             >
-              <option value="">
-                Todos os tipos de peças
-              </option>
+              <option value="">Todos os tipos de peças</option>
 
               {TIPOS.map((tipo) => (
                 <option key={tipo} value={tipo}>
@@ -524,7 +614,6 @@ function App() {
               ))}
             </select>
 
-            {/* MARCA */}
             <select
               style={input}
               value={marca}
@@ -534,9 +623,7 @@ function App() {
                 setDigitarModelo(false);
               }}
             >
-              <option value="">
-                Todas as marcas
-              </option>
+              <option value="">Todas as marcas</option>
 
               {MARCAS.map((m) => (
                 <option key={m} value={m}>
@@ -545,7 +632,6 @@ function App() {
               ))}
             </select>
 
-            {/* MODELO COM SETINHA */}
             <select
               style={input}
               value={digitarModelo ? "__digitar__" : modelo}
@@ -561,9 +647,7 @@ function App() {
                 }
               }}
             >
-              <option value="">
-                Todos os modelos
-              </option>
+              <option value="">Todos os modelos</option>
 
               {modelosDisponiveis.map((nome) => (
                 <option key={nome} value={nome}>
@@ -576,16 +660,13 @@ function App() {
               </option>
             </select>
 
-            {/* CAMPO PARA DIGITAR */}
             {digitarModelo && (
               <div>
                 <input
                   style={input}
                   placeholder="Digite o modelo exato"
                   value={modelo}
-                  onChange={(e) =>
-                    setModelo(e.target.value)
-                  }
+                  onChange={(e) => setModelo(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       void pesquisarPecas();
@@ -619,9 +700,7 @@ function App() {
         {tela === "cadastrar" && perfil === "admin" && (
           <section style={searchCard}>
             <h2 style={sectionTitle}>
-              {editandoId
-                ? "Alterar Preço"
-                : "Cadastrar Novo Preço"}
+              {editandoId ? "Alterar Preço" : "Cadastrar Novo Preço"}
             </h2>
 
             <select
@@ -634,16 +713,12 @@ function App() {
                 })
               }
             >
-              <option value="">
-                Selecione o tipo de peça
-              </option>
+              <option value="">Selecione o tipo de peça</option>
 
               {[
                 ...new Set([
                   ...TIPOS,
-                  ...(novaPeca.tipo_peca
-                    ? [novaPeca.tipo_peca]
-                    : []),
+                  ...(novaPeca.tipo_peca ? [novaPeca.tipo_peca] : []),
                 ]),
               ].map((t) => (
                 <option key={t} value={t}>
@@ -662,16 +737,12 @@ function App() {
                 })
               }
             >
-              <option value="">
-                Selecione a marca
-              </option>
+              <option value="">Selecione a marca</option>
 
               {[
                 ...new Set([
                   ...MARCAS,
-                  ...(novaPeca.marca
-                    ? [novaPeca.marca]
-                    : []),
+                  ...(novaPeca.marca ? [novaPeca.marca] : []),
                 ]),
               ].map((m) => (
                 <option key={m} value={m}>
@@ -680,7 +751,6 @@ function App() {
               ))}
             </select>
 
-            {/* CADASTRO MANUAL DO MODELO */}
             <input
               style={input}
               placeholder="Modelo. Ex: iPhone 11 Pro Max"
@@ -703,16 +773,12 @@ function App() {
                 })
               }
             >
-              <option value="">
-                Selecione a qualidade
-              </option>
+              <option value="">Selecione a qualidade</option>
 
               {[
                 ...new Set([
                   ...QUALIDADES,
-                  ...(novaPeca.qualidade
-                    ? [novaPeca.qualidade]
-                    : []),
+                  ...(novaPeca.qualidade ? [novaPeca.qualidade] : []),
                 ]),
               ].map((q) => (
                 <option key={q} value={q}>
@@ -751,9 +817,7 @@ function App() {
               style={button}
               onClick={() => void salvarPeca()}
             >
-              {editandoId
-                ? "Salvar Alteração"
-                : "Salvar Preço"}
+              {editandoId ? "Salvar Alteração" : "Salvar Preço"}
             </button>
           </section>
         )}
@@ -773,17 +837,12 @@ function App() {
             ) : (
               <div style={listBox}>
                 {listaAtual.map((peca) => (
-                  <div
-                    key={peca.id}
-                    style={pieceCard}
-                  >
+                  <div key={peca.id} style={pieceCard}>
                     <div
                       style={{
                         ...brandLogo,
                         background: corLogo(peca.marca),
-                        color: normalizar(
-                          peca.marca
-                        ).includes("apple")
+                        color: normalizar(peca.marca).includes("apple")
                           ? "#111"
                           : "#fff",
                       }}
@@ -793,8 +852,7 @@ function App() {
 
                     <div style={infoBox}>
                       <h3 style={pieceTitle}>
-                        {peca.tipo_peca} -{" "}
-                        {peca.marca} {peca.modelo}
+                        {peca.tipo_peca} - {peca.marca} {peca.modelo}
                       </h3>
 
                       <p style={pieceText}>
@@ -806,8 +864,7 @@ function App() {
 
                       {perfil === "admin" && (
                         <p style={pieceText}>
-                          Custo:{" "}
-                          {dinheiro(peca.valor_custo)}
+                          Custo: {dinheiro(peca.valor_custo)}
                         </p>
                       )}
                     </div>
@@ -815,9 +872,7 @@ function App() {
                     <div style={divider} />
 
                     <div style={priceArea}>
-                      <p style={priceLabel}>
-                        Valor final:
-                      </p>
+                      <p style={priceLabel}>Valor final:</p>
 
                       <h2 style={price}>
                         {dinheiro(peca.valor_final)}
@@ -827,9 +882,7 @@ function App() {
                         <div style={actionBox}>
                           <button
                             style={editButton}
-                            onClick={() =>
-                              editarPeca(peca)
-                            }
+                            onClick={() => editarPeca(peca)}
                             title="Editar"
                           >
                             ✎
@@ -856,27 +909,21 @@ function App() {
               <button
                 style={pageButton}
                 disabled={pagina === 1}
-                onClick={() =>
-                  setPagina((p) => p - 1)
-                }
+                onClick={() => setPagina((p) => p - 1)}
               >
                 Anterior
               </button>
 
               <p style={pageText}>
                 Página{" "}
-                <strong style={orangeText}>
-                  {pagina}
-                </strong>{" "}
+                <strong style={orangeText}>{pagina}</strong>{" "}
                 de {totalPaginas}
               </p>
 
               <button
                 style={nextButton}
                 disabled={pagina === totalPaginas}
-                onClick={() =>
-                  setPagina((p) => p + 1)
-                }
+                onClick={() => setPagina((p) => p + 1)}
               >
                 Próxima
               </button>
@@ -1275,5 +1322,3 @@ const loginButton = {
   fontSize: 16,
   cursor: "pointer",
 };
-
-export default App;

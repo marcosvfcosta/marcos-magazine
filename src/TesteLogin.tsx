@@ -1,12 +1,39 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "./supabase";
 
 export default function TesteLogin() {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  const [confirmarSenha, setConfirmarSenha] = useState("");
   const [mensagem, setMensagem] = useState("");
   const [testando, setTestando] = useState(false);
+  const [recuperando, setRecuperando] = useState(false);
+
+  useEffect(() => {
+    const { data: { subscription } } =
+      supabase.auth.onAuthStateChange((event) => {
+        if (event === "PASSWORD_RECOVERY") {
+          setRecuperando(true);
+          setSenha("");
+          setMensagem("Digite sua nova senha.");
+        }
+      });
+
+    // Identifica um link de recuperação recém-aberto.
+    // Não usa uma sessão comum como autorização para redefinir.
+    const hash = new URLSearchParams(
+      window.location.hash.substring(1)
+    );
+
+    if (hash.get("type") === "recovery") {
+      setRecuperando(true);
+      setSenha("");
+      setMensagem("Digite sua nova senha.");
+    }
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   async function testar() {
     if (!email.trim() || !senha) {
@@ -23,10 +50,10 @@ export default function TesteLogin() {
     });
 
     if (error) {
-      setMensagem("❌ Login não funcionou: " + error.message);
+      setMensagem("Login não funcionou: " + error.message);
     } else {
-      setMensagem("✅ Senha correta! Login confirmado.");
       await supabase.auth.signOut();
+      setMensagem("Login confirmado! E-mail e senha corretos.");
     }
 
     setSenha("");
@@ -45,70 +72,170 @@ export default function TesteLogin() {
     const { error } = await supabase.auth.resetPasswordForEmail(
       email.trim(),
       {
-        redirectTo: "http://localhost:5173",
+        redirectTo: window.location.origin,
       }
     );
 
-    if (error) {
-      setMensagem("❌ Erro: " + error.message);
-    } else {
+    setMensagem(
+      error
+        ? "Erro: " + error.message
+        : "Verifique seu e-mail para recuperar a senha."
+    );
+
+    setTestando(false);
+  }
+
+  async function definirNovaSenha() {
+    if (senha.length < 8) {
+      setMensagem("A nova senha precisa ter pelo menos 8 caracteres.");
+      return;
+    }
+
+    if (senha !== confirmarSenha) {
+      setMensagem("As senhas não são iguais.");
+      return;
+    }
+
+    setTestando(true);
+    setMensagem("Salvando nova senha...");
+
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session) {
       setMensagem(
-        "✅ Solicitação enviada. Verifique seu Gmail e a pasta Spam."
+        "Link inválido ou expirado. Solicite uma nova recuperação."
+      );
+      setTestando(false);
+      return;
+    }
+
+    const { error } = await supabase.auth.updateUser({
+      password: senha,
+    });
+
+    if (error) {
+      setMensagem("Erro ao alterar senha: " + error.message);
+    } else {
+      await supabase.auth.signOut();
+      setSenha("");
+      setConfirmarSenha("");
+      setRecuperando(false);
+      setMensagem("Senha alterada com sucesso! Agora teste seu login.");
+      window.history.replaceState(
+        {},
+        document.title,
+        window.location.pathname
       );
     }
 
     setTestando(false);
   }
 
+  const campo = {
+    padding: 12,
+    width: "100%",
+    maxWidth: 350,
+    boxSizing: "border-box" as const,
+    marginBottom: 12,
+    borderRadius: 6,
+    border: "1px solid #555",
+  };
+
+  const botao = {
+    padding: 12,
+    marginRight: 10,
+    marginBottom: 10,
+    cursor: "pointer",
+    borderRadius: 6,
+  };
+
   return (
     <div
       style={{
-        padding: 30,
         background: "#111",
         color: "white",
         minHeight: "100vh",
+        padding: 30,
         fontFamily: "Arial",
       }}
     >
-      <h2>Teste de Login Supabase</h2>
+      <h2 style={{ color: "#ff6600" }}>
+        Marcos Magazine
+      </h2>
 
-      <div style={{ marginBottom: 12 }}>
-        <input
-          type="email"
-          placeholder="E-mail"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ padding: 10, width: 280, maxWidth: "100%" }}
-        />
-      </div>
+      <h3>
+        {recuperando
+          ? "Cadastrar nova senha"
+          : "Teste de Login Supabase"}
+      </h3>
 
-      <div style={{ marginBottom: 12 }}>
-        <input
-          type="password"
-          placeholder="Senha"
-          value={senha}
-          onChange={(e) => setSenha(e.target.value)}
-          style={{ padding: 10, width: 280, maxWidth: "100%" }}
-        />
-      </div>
+      {recuperando ? (
+        <div>
+          <input
+            type="password"
+            placeholder="Nova senha (mínimo 8 caracteres)"
+            value={senha}
+            onChange={(e) => setSenha(e.target.value)}
+            style={campo}
+          />
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button
-          onClick={testar}
-          disabled={testando}
-          style={{ padding: 10, cursor: "pointer" }}
-        >
-          Testar senha
-        </button>
+          <div>
+            <input
+              type="password"
+              placeholder="Confirmar nova senha"
+              value={confirmarSenha}
+              onChange={(e) => setConfirmarSenha(e.target.value)}
+              style={campo}
+            />
+          </div>
 
-        <button
-          onClick={recuperarSenha}
-          disabled={testando}
-          style={{ padding: 10, cursor: "pointer" }}
-        >
-          Recuperar senha
-        </button>
-      </div>
+          <button
+            onClick={definirNovaSenha}
+            disabled={testando}
+            style={botao}
+          >
+            Salvar nova senha
+          </button>
+        </div>
+      ) : (
+        <div>
+          <div>
+            <input
+              type="email"
+              placeholder="E-mail"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              style={campo}
+            />
+          </div>
+
+          <div>
+            <input
+              type="password"
+              placeholder="Senha"
+              value={senha}
+              onChange={(e) => setSenha(e.target.value)}
+              style={campo}
+            />
+          </div>
+
+          <button
+            onClick={testar}
+            disabled={testando}
+            style={botao}
+          >
+            Testar senha
+          </button>
+
+          <button
+            onClick={recuperarSenha}
+            disabled={testando}
+            style={botao}
+          >
+            Recuperar senha
+          </button>
+        </div>
+      )}
 
       <p>{mensagem}</p>
     </div>
