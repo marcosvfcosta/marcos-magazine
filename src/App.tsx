@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
 
 type Perfil = "admin" | "funcionario" | "";
-type Tela = "consultar" | "cadastrar" | "todos";
+type Tela = "consultar" | "informacoes" | "cadastrar" | "todos";
 
 type Peca = {
   id: string;
@@ -16,34 +16,26 @@ type Peca = {
   created_at?: string;
 };
 
+type Informacao = {
+  id: string;
+  titulo: string;
+  conteudo: string;
+  created_at?: string;
+};
+
 const EMAIL_ADMIN = "marcosvinicius95pnnn@gmail.com";
 const EMAIL_FUNCIONARIO = "funcionario@marcosmagazine.com.br";
 
 const MARCAS = ["Apple", "Samsung", "Xiaomi", "Motorola", "Realme"];
-
 const QUALIDADES = [
-  "OLED",
-  "LCD",
-  "Premium",
-  "Original Nacional",
-  "Peça genuína",
-  "Peça não genuína",
-  "Subplaca tipo c",
-  "Subplaca V8",
-  "Conector",
+  "OLED", "LCD", "Premium", "Original Nacional",
+  "Peça genuína", "Peça não genuína",
+  "Subplaca tipo c", "Subplaca V8", "Conector",
 ];
-
 const TIPOS = [
-  "Tela",
-  "Bateria",
-  "Conector de carga",
-  "Câmera",
-  "Tampa traseira",
-  "Flex",
-  "Alto-falante",
-  "Microfone",
-  "Película",
-  "Outro",
+  "Tela", "Bateria", "Conector de carga", "Câmera",
+  "Tampa traseira", "Flex", "Alto-falante",
+  "Microfone", "Película", "Outro",
 ];
 
 function normalizar(valor: string) {
@@ -113,39 +105,36 @@ export default function App() {
   const [marca, setMarca] = useState("");
   const [modelo, setModelo] = useState("");
   const [digitarModelo, setDigitarModelo] = useState(false);
-
   const [novaPeca, setNovaPeca] = useState(formularioVazio());
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [pagina, setPagina] = useState(1);
   const [carregando, setCarregando] = useState(false);
 
+  const [informacoes, setInformacoes] = useState<Informacao[]>([]);
+  const [tituloInfo, setTituloInfo] = useState("");
+  const [conteudoInfo, setConteudoInfo] = useState("");
+  const [editandoInfo, setEditandoInfo] = useState<string | null>(null);
+  const [salvandoInfo, setSalvandoInfo] = useState(false);
+  const [erroInfo, setErroInfo] = useState("");
+
   const porPagina = 5;
 
   const modelosDisponiveis = useMemo(() => {
     const encontrados = new Map<string, string>();
-
     for (const peca of pecas) {
-      if (
-        marca &&
-        normalizar(peca.marca) !== normalizar(marca)
-      ) {
-        continue;
-      }
-
+      if (marca && normalizar(peca.marca) !== normalizar(marca)) continue;
       const nome = (peca.modelo || "").trim();
       const chave = normalizar(nome);
-
       if (nome && !encontrados.has(chave)) {
         encontrados.set(chave, nome);
       }
     }
-
     return Array.from(encontrados.values()).sort((a, b) =>
       a.localeCompare(b, "pt-BR", { numeric: true })
     );
   }, [pecas, marca]);
 
-  async function carregarPerfil(usuarioId: string) {
+  async function carregarPerfil(usuarioId: string): Promise<Perfil> {
     const { data, error } = await supabase
       .from("perfis")
       .select("perfil")
@@ -153,15 +142,11 @@ export default function App() {
       .single();
 
     if (error || !data) {
-      throw new Error(
-        "Seu usuário não possui um perfil autorizado. Verifique a tabela perfis no Supabase."
-      );
+      throw new Error("Usuário sem perfil autorizado no Supabase.");
     }
-
     if (data.perfil !== "admin" && data.perfil !== "funcionario") {
       throw new Error("Perfil de acesso inválido.");
     }
-
     return data.perfil as Perfil;
   }
 
@@ -175,8 +160,101 @@ export default function App() {
       alert("Erro ao carregar peças: " + error.message);
       return;
     }
-
     setPecas((data || []) as Peca[]);
+  }
+
+  async function carregarInformacoes() {
+    const { data, error } = await supabase
+      .from("informacoes")
+      .select("id,titulo,conteudo,created_at")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      setErroInfo("Erro ao carregar informações: " + error.message);
+      return;
+    }
+    setErroInfo("");
+    setInformacoes((data || []) as Informacao[]);
+  }
+
+  function limparInformacao() {
+    setTituloInfo("");
+    setConteudoInfo("");
+    setEditandoInfo(null);
+  }
+
+  async function salvarInformacao() {
+    if (perfil !== "admin" || salvandoInfo) return;
+
+    if (!tituloInfo.trim() || !conteudoInfo.trim()) {
+      alert("Preencha o título e a descrição.");
+      return;
+    }
+
+    setSalvandoInfo(true);
+    try {
+      const dados = {
+        titulo: tituloInfo.trim(),
+        conteudo: conteudoInfo.trim(),
+      };
+
+      const resultado = editandoInfo
+        ? await supabase
+            .from("informacoes")
+            .update(dados)
+            .eq("id", editandoInfo)
+            .select("id")
+        : await supabase
+            .from("informacoes")
+            .insert(dados)
+            .select("id");
+
+      if (resultado.error) {
+        alert("Erro ao salvar: " + resultado.error.message);
+        return;
+      }
+
+      if (!resultado.data?.length) {
+        alert("Não foi possível confirmar a gravação.");
+        return;
+      }
+
+      const editou = Boolean(editandoInfo);
+      limparInformacao();
+      await carregarInformacoes();
+      alert(editou ? "Informação atualizada!" : "Informação cadastrada!");
+    } finally {
+      setSalvandoInfo(false);
+    }
+  }
+
+  function editarInformacao(item: Informacao) {
+    if (perfil !== "admin") return;
+    setTituloInfo(item.titulo);
+    setConteudoInfo(item.conteudo);
+    setEditandoInfo(item.id);
+  }
+
+  async function excluirInformacao(id: string) {
+    if (perfil !== "admin") return;
+    if (!confirm("Deseja excluir esta informação?")) return;
+
+    const { data, error } = await supabase
+      .from("informacoes")
+      .delete()
+      .eq("id", id)
+      .select("id");
+
+    if (error) {
+      alert("Erro ao excluir: " + error.message);
+      return;
+    }
+    if (!data?.length) {
+      alert("Exclusão não autorizada.");
+      return;
+    }
+    if (editandoInfo === id) limparInformacao();
+    await carregarInformacoes();
   }
 
   useEffect(() => {
@@ -194,12 +272,11 @@ export default function App() {
           return;
         }
 
-        const perfilEncontrado = await carregarPerfil(data.user.id);
-
+        const encontrado = await carregarPerfil(data.user.id);
         if (ativo) {
-          setPerfil(perfilEncontrado);
+          setPerfil(encontrado);
           setLogado(true);
-          await carregarPecas();
+          await Promise.all([carregarPecas(), carregarInformacoes()]);
         }
       } catch (erro) {
         console.error(erro);
@@ -213,32 +290,23 @@ export default function App() {
     }
 
     void verificarSessao();
-
-    return () => {
-      ativo = false;
-    };
+    return () => { ativo = false; };
   }, []);
 
   async function entrar() {
     if (entrando) return;
-
     if (!usuario.trim() || !senha) {
       alert("Informe o usuário e a senha.");
       return;
     }
 
     setEntrando(true);
-
     try {
       const nome = usuario.trim().toLowerCase().replace(/^@/, "");
-
       let email = usuario.trim();
 
-      if (nome === "admin") {
-        email = EMAIL_ADMIN;
-      } else if (nome === "funcionario") {
-        email = EMAIL_FUNCIONARIO;
-      }
+      if (nome === "admin") email = EMAIL_ADMIN;
+      else if (nome === "funcionario") email = EMAIL_FUNCIONARIO;
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -250,29 +318,23 @@ export default function App() {
         return;
       }
 
-      let perfilEncontrado: Perfil;
-
+      let encontrado: Perfil;
       try {
-        perfilEncontrado = await carregarPerfil(data.user.id);
+        encontrado = await carregarPerfil(data.user.id);
       } catch (erro) {
         await supabase.auth.signOut();
         throw erro;
       }
 
-      setPerfil(perfilEncontrado);
+      setPerfil(encontrado);
       setLogado(true);
       setTela("consultar");
       setSenha("");
       setResultados([]);
       setPagina(1);
-
-      await carregarPecas();
+      await Promise.all([carregarPecas(), carregarInformacoes()]);
     } catch (erro) {
-      alert(
-        erro instanceof Error
-          ? erro.message
-          : "Não foi possível entrar."
-      );
+      alert(erro instanceof Error ? erro.message : "Erro ao entrar.");
     } finally {
       setEntrando(false);
     }
@@ -280,12 +342,10 @@ export default function App() {
 
   async function sair() {
     const { error } = await supabase.auth.signOut();
-
     if (error) {
       alert("Erro ao sair: " + error.message);
       return;
     }
-
     setLogado(false);
     setPerfil("");
     setUsuario("");
@@ -293,8 +353,10 @@ export default function App() {
     setTela("consultar");
     setPecas([]);
     setResultados([]);
+    setInformacoes([]);
     setModelo("");
     setDigitarModelo(false);
+    limparInformacao();
   }
 
   function limparFormulario() {
@@ -305,7 +367,6 @@ export default function App() {
   async function pesquisarPecas() {
     const modeloEscolhido = normalizar(modelo);
     setCarregando(true);
-
     try {
       const { data, error } = await supabase
         .from("pecas_precos")
@@ -318,18 +379,12 @@ export default function App() {
       }
 
       const filtrados = ((data || []) as Peca[]).filter((peca) => {
-        const tipoOk =
-          !tipoPeca.trim() ||
+        const tipoOk = !tipoPeca.trim() ||
           normalizar(peca.tipo_peca) === normalizar(tipoPeca);
-
-        const marcaOk =
-          !marca.trim() ||
+        const marcaOk = !marca.trim() ||
           normalizar(peca.marca) === normalizar(marca);
-
-        const modeloOk =
-          !modeloEscolhido ||
+        const modeloOk = !modeloEscolhido ||
           normalizar(peca.modelo) === modeloEscolhido;
-
         return tipoOk && marcaOk && modeloOk;
       });
 
@@ -342,7 +397,7 @@ export default function App() {
 
   async function salvarPeca() {
     if (perfil !== "admin") {
-      alert("Somente o administrador pode cadastrar ou alterar preços.");
+      alert("Somente o administrador pode alterar preços.");
       return;
     }
 
@@ -355,25 +410,18 @@ export default function App() {
       valor_final: converterNumero(novaPeca.valor_final),
     };
 
-    if (
-      !dados.tipo_peca ||
-      !dados.marca ||
-      !dados.modelo ||
-      !dados.qualidade
-    ) {
+    if (!dados.tipo_peca || !dados.marca ||
+        !dados.modelo || !dados.qualidade) {
       alert("Preencha tipo, marca, modelo e qualidade.");
       return;
     }
 
-    if (
-      !novaPeca.valor_custo.trim() ||
-      !novaPeca.valor_final.trim() ||
-      !Number.isFinite(dados.valor_custo) ||
-      !Number.isFinite(dados.valor_final) ||
-      dados.valor_custo < 0 ||
-      dados.valor_final < 0
-    ) {
-      alert("Informe valores de custo e final válidos.");
+    if (!novaPeca.valor_custo.trim() ||
+        !novaPeca.valor_final.trim() ||
+        !Number.isFinite(dados.valor_custo) ||
+        !Number.isFinite(dados.valor_final) ||
+        dados.valor_custo < 0 || dados.valor_final < 0) {
+      alert("Informe valores válidos.");
       return;
     }
 
@@ -387,7 +435,6 @@ export default function App() {
         alert(error.message);
         return;
       }
-
       alert("Preço alterado com sucesso!");
     } else {
       const { error } = await supabase
@@ -398,7 +445,6 @@ export default function App() {
         alert(error.message);
         return;
       }
-
       alert("Preço cadastrado com sucesso!");
     }
 
@@ -410,10 +456,8 @@ export default function App() {
 
   function editarPeca(peca: Peca) {
     if (perfil !== "admin") return;
-
     setEditandoId(peca.id);
     setTela("cadastrar");
-
     setNovaPeca({
       tipo_peca: peca.tipo_peca || "",
       marca: peca.marca || "",
@@ -425,11 +469,7 @@ export default function App() {
   }
 
   async function excluirPeca(id: string) {
-    if (perfil !== "admin") {
-      alert("Acesso não autorizado.");
-      return;
-    }
-
+    if (perfil !== "admin") return;
     if (!confirm("Deseja excluir essa peça?")) return;
 
     const { error } = await supabase
@@ -441,21 +481,13 @@ export default function App() {
       alert(error.message);
       return;
     }
-
     alert("Peça excluída com sucesso!");
-
     await carregarPecas();
-
     setResultados((atual) => atual.filter((p) => p.id !== id));
   }
 
   const listaBase = tela === "consultar" ? resultados : pecas;
-
-  const totalPaginas = Math.max(
-    1,
-    Math.ceil(listaBase.length / porPagina)
-  );
-
+  const totalPaginas = Math.max(1, Math.ceil(listaBase.length / porPagina));
   const listaAtual = listaBase.slice(
     (pagina - 1) * porPagina,
     pagina * porPagina
@@ -474,11 +506,7 @@ export default function App() {
     return (
       <div style={loginPage}>
         <h1 style={loginTitle}>Marcos Magazine</h1>
-
-        <h2 style={loginSubtitle}>
-          Consulta de Preços de Peças
-        </h2>
-
+        <h2 style={loginSubtitle}>Consulta de Preços de Peças</h2>
         <div style={loginCard}>
           <input
             style={loginInput}
@@ -487,7 +515,6 @@ export default function App() {
             value={usuario}
             onChange={(e) => setUsuario(e.target.value)}
           />
-
           <input
             style={loginInput}
             placeholder="Senha"
@@ -499,7 +526,6 @@ export default function App() {
               if (e.key === "Enter") void entrar();
             }}
           />
-
           <button
             style={loginButton}
             onClick={() => void entrar()}
@@ -516,12 +542,10 @@ export default function App() {
     <div style={page}>
       <aside style={sidebar}>
         <h2 style={sidebarTitle}>Marcos Magazine</h2>
-
         <div style={orangeLine} />
 
         <div style={profileBox}>
           <div style={profileIcon}>👤</div>
-
           <p style={profileText}>
             Perfil:
             <br />
@@ -532,39 +556,38 @@ export default function App() {
         </div>
 
         <button
-          style={
-            tela === "consultar" ? activeMenuButton : menuButton
-          }
+          style={tela === "consultar" ? activeMenuButton : menuButton}
           onClick={() => {
             setTela("consultar");
             setPagina(1);
           }}
         >
           <span style={menuIcon}>⌕</span>
-          <span>
-            Consultar
-            <br />
-            Peças
-          </span>
+          <span>Consultar<br />Peças</span>
+        </button>
+
+        <button
+          style={tela === "informacoes" ? activeMenuButton : menuButton}
+          onClick={() => {
+            setTela("informacoes");
+            void carregarInformacoes();
+          }}
+        >
+          <span style={menuIcon}>ⓘ</span>
+          <span>Informações</span>
         </button>
 
         {perfil === "admin" && (
           <>
             <button
-              style={
-                tela === "cadastrar" ? activeMenuButton : menuButton
-              }
+              style={tela === "cadastrar" ? activeMenuButton : menuButton}
               onClick={() => {
                 limparFormulario();
                 setTela("cadastrar");
               }}
             >
               <span style={menuIcon}>+</span>
-              <span>
-                Cadastrar
-                <br />
-                Preços
-              </span>
+              <span>Cadastrar<br />Preços</span>
             </button>
 
             <button
@@ -575,19 +598,12 @@ export default function App() {
               }}
             >
               <span style={menuIcon}>▦</span>
-              <span>
-                Todos os
-                <br />
-                Preços
-              </span>
+              <span>Todos os<br />Preços</span>
             </button>
           </>
         )}
 
-        <button
-          style={logoutButton}
-          onClick={() => void sair()}
-        >
+        <button style={logoutButton} onClick={() => void sair()}>
           <span style={exitIcon}>↪</span>
           <span>Sair</span>
         </button>
@@ -595,8 +611,125 @@ export default function App() {
 
       <main style={content}>
         <h1 style={mainTitle}>
-          Consulta de Preços de Peças
+          {tela === "informacoes"
+            ? "Informações Técnicas"
+            : "Consulta de Preços de Peças"}
         </h1>
+
+        {tela === "informacoes" && (
+          <section>
+            <h2 style={subTitle}>
+              Informações sobre peças e componentes
+            </h2>
+
+            {perfil === "admin" && (
+              <div style={searchCard}>
+                <h2 style={sectionTitle}>
+                  {editandoInfo
+                    ? "Editar informação"
+                    : "Cadastrar informação"}
+                </h2>
+
+                <input
+                  style={input}
+                  placeholder="Título. Ex: Bateria genuína x não genuína"
+                  value={tituloInfo}
+                  onChange={(e) => setTituloInfo(e.target.value)}
+                />
+
+                <textarea
+                  style={{
+                    ...input,
+                    minHeight: 140,
+                    resize: "vertical" as const,
+                    fontFamily: "Arial, sans-serif",
+                  }}
+                  placeholder="Escreva aqui a explicação completa..."
+                  value={conteudoInfo}
+                  onChange={(e) => setConteudoInfo(e.target.value)}
+                />
+
+                <button
+                  style={button}
+                  disabled={salvandoInfo}
+                  onClick={() => void salvarInformacao()}
+                >
+                  {salvandoInfo
+                    ? "Salvando..."
+                    : editandoInfo
+                    ? "Salvar alteração"
+                    : "Cadastrar informação"}
+                </button>
+
+                {editandoInfo && (
+                  <button
+                    style={{ ...secondaryButton, marginTop: 10 }}
+                    onClick={limparInformacao}
+                  >
+                    Cancelar edição
+                  </button>
+                )}
+              </div>
+            )}
+
+            {erroInfo && (
+              <p style={{ color: "#ff7777" }}>{erroInfo}</p>
+            )}
+
+            {informacoes.length === 0 && !erroInfo && (
+              <div style={emptyCard}>
+                Nenhuma informação cadastrada.
+              </div>
+            )}
+
+            <div style={listBox}>
+              {informacoes.map((item) => (
+                <article key={item.id} style={searchCard}>
+                  <h3
+                    style={{
+                      color: "#ff6600",
+                      fontSize: 16,
+                      marginTop: 0,
+                    }}
+                  >
+                    {item.titulo}
+                  </h3>
+
+                  <p
+                    style={{
+                      whiteSpace: "pre-wrap",
+                      overflowWrap: "anywhere",
+                      lineHeight: 1.5,
+                      fontSize: 14,
+                    }}
+                  >
+                    {item.conteudo}
+                  </p>
+
+                  {perfil === "admin" && (
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        style={secondaryButton}
+                        onClick={() => editarInformacao(item)}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        style={{
+                          ...secondaryButton,
+                          color: "#ff7777",
+                        }}
+                        onClick={() => void excluirInformacao(item.id)}
+                      >
+                        Excluir
+                      </button>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
 
         {tela === "consultar" && (
           <section style={searchCard}>
@@ -606,11 +739,8 @@ export default function App() {
               onChange={(e) => setTipoPeca(e.target.value)}
             >
               <option value="">Todos os tipos de peças</option>
-
               {TIPOS.map((tipo) => (
-                <option key={tipo} value={tipo}>
-                  {tipo}
-                </option>
+                <option key={tipo} value={tipo}>{tipo}</option>
               ))}
             </select>
 
@@ -624,11 +754,8 @@ export default function App() {
               }}
             >
               <option value="">Todas as marcas</option>
-
               {MARCAS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
+                <option key={m} value={m}>{m}</option>
               ))}
             </select>
 
@@ -637,7 +764,6 @@ export default function App() {
               value={digitarModelo ? "__digitar__" : modelo}
               onChange={(e) => {
                 const valor = e.target.value;
-
                 if (valor === "__digitar__") {
                   setDigitarModelo(true);
                   setModelo("");
@@ -648,16 +774,10 @@ export default function App() {
               }}
             >
               <option value="">Todos os modelos</option>
-
               {modelosDisponiveis.map((nome) => (
-                <option key={nome} value={nome}>
-                  {nome}
-                </option>
+                <option key={nome} value={nome}>{nome}</option>
               ))}
-
-              <option value="__digitar__">
-                ✏️ Digitar modelo
-              </option>
+              <option value="__digitar__">✏️ Digitar modelo</option>
             </select>
 
             {digitarModelo && (
@@ -668,12 +788,9 @@ export default function App() {
                   value={modelo}
                   onChange={(e) => setModelo(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      void pesquisarPecas();
-                    }
+                    if (e.key === "Enter") void pesquisarPecas();
                   }}
                 />
-
                 <button
                   type="button"
                   style={secondaryButton}
@@ -714,16 +831,13 @@ export default function App() {
               }
             >
               <option value="">Selecione o tipo de peça</option>
-
               {[
                 ...new Set([
                   ...TIPOS,
                   ...(novaPeca.tipo_peca ? [novaPeca.tipo_peca] : []),
                 ]),
               ].map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
+                <option key={t} value={t}>{t}</option>
               ))}
             </select>
 
@@ -738,16 +852,13 @@ export default function App() {
               }
             >
               <option value="">Selecione a marca</option>
-
               {[
                 ...new Set([
                   ...MARCAS,
                   ...(novaPeca.marca ? [novaPeca.marca] : []),
                 ]),
               ].map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
+                <option key={m} value={m}>{m}</option>
               ))}
             </select>
 
@@ -774,16 +885,13 @@ export default function App() {
               }
             >
               <option value="">Selecione a qualidade</option>
-
               {[
                 ...new Set([
                   ...QUALIDADES,
                   ...(novaPeca.qualidade ? [novaPeca.qualidade] : []),
                 ]),
               ].map((q) => (
-                <option key={q} value={q}>
-                  {q}
-                </option>
+                <option key={q} value={q}>{q}</option>
               ))}
             </select>
 
@@ -831,9 +939,7 @@ export default function App() {
             </h2>
 
             {listaAtual.length === 0 ? (
-              <div style={emptyCard}>
-                Nenhuma peça encontrada.
-              </div>
+              <div style={emptyCard}>Nenhuma peça encontrada.</div>
             ) : (
               <div style={listBox}>
                 {listaAtual.map((peca) => (
@@ -854,14 +960,12 @@ export default function App() {
                       <h3 style={pieceTitle}>
                         {peca.tipo_peca} - {peca.marca} {peca.modelo}
                       </h3>
-
                       <p style={pieceText}>
                         Qualidade:{" "}
                         <strong style={orangeText}>
                           {peca.qualidade}
                         </strong>
                       </p>
-
                       {perfil === "admin" && (
                         <p style={pieceText}>
                           Custo: {dinheiro(peca.valor_custo)}
@@ -873,7 +977,6 @@ export default function App() {
 
                     <div style={priceArea}>
                       <p style={priceLabel}>Valor final:</p>
-
                       <h2 style={price}>
                         {dinheiro(peca.valor_final)}
                       </h2>
@@ -887,12 +990,9 @@ export default function App() {
                           >
                             ✎
                           </button>
-
                           <button
                             style={deleteButton}
-                            onClick={() =>
-                              void excluirPeca(peca.id)
-                            }
+                            onClick={() => void excluirPeca(peca.id)}
                             title="Excluir"
                           >
                             🗑
@@ -915,8 +1015,7 @@ export default function App() {
               </button>
 
               <p style={pageText}>
-                Página{" "}
-                <strong style={orangeText}>{pagina}</strong>{" "}
+                Página <strong style={orangeText}>{pagina}</strong>{" "}
                 de {totalPaginas}
               </p>
 
@@ -982,9 +1081,7 @@ const profileBox = {
   marginBottom: 24,
 };
 
-const profileIcon = {
-  fontSize: 23,
-};
+const profileIcon = { fontSize: 23 };
 
 const profileText = {
   fontSize: 12,
@@ -1088,9 +1185,7 @@ const brandLogo = {
   justifySelf: "center",
 };
 
-const infoBox = {
-  minWidth: 0,
-};
+const infoBox = { minWidth: 0 };
 
 const pieceTitle = {
   margin: "0 0 7px",
@@ -1105,9 +1200,7 @@ const pieceText = {
   color: "#d6d6d6",
 };
 
-const orangeText = {
-  color: "#ff6600",
-};
+const orangeText = { color: "#ff6600" };
 
 const divider = {
   width: 1,
@@ -1115,9 +1208,7 @@ const divider = {
   background: "#303030",
 };
 
-const priceArea = {
-  textAlign: "right" as const,
-};
+const priceArea = { textAlign: "right" as const };
 
 const priceLabel = {
   margin: 0,
@@ -1191,9 +1282,7 @@ const nextButton = {
   cursor: "pointer",
 };
 
-const pageText = {
-  fontSize: 12,
-};
+const pageText = { fontSize: 12 };
 
 const totalText = {
   gridColumn: "1 / 4",
