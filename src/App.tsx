@@ -30,6 +30,36 @@ type Variacao = {
   imagem_url: string | null;
 };
 
+type PedidoManual = {
+  id: string;
+  categoria: Categoria;
+  marca: string | null;
+  modelo: string | null;
+  nome_produto: string | null;
+  publico: string | null;
+  tipo: string | null;
+  descricao: string | null;
+  quantidade: number;
+  status: "pendente" | "pedido_feito" | "recebido";
+  created_at: string;
+};
+
+type FormManual = {
+  categoria: Categoria;
+  marca: string;
+  modelo: string;
+  nome_produto: string;
+  publico: string;
+  tipo: string;
+  descricao: string;
+  quantidade: string;
+};
+
+const manualVazio = (): FormManual => ({
+  categoria: "Capas", marca: "", modelo: "", nome_produto: "",
+  publico: "Feminina", tipo: "Decorado", descricao: "", quantidade: "1",
+});
+
 type Especial = {
   id: string;
   nome_cliente: string;
@@ -854,6 +884,9 @@ export default function App() {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [variacoes, setVariacoes] = useState<Variacao[]>([]);
   const [especiais, setEspeciais] = useState<Especial[]>([]);
+  const [manuais, setManuais] = useState<PedidoManual[]>([]);
+  const [mostrarManual, setMostrarManual] = useState(false);
+  const [formManual, setFormManual] = useState<FormManual>(manualVazio());
   const [pecas, setPecas] = useState<Peca[]>([]);
   const [informacoes, setInformacoes] = useState<Informacao[]>([]);
 
@@ -932,6 +965,48 @@ export default function App() {
     setVariacoes((v.data || []) as Variacao[]);
   }
 
+  async function carregarManuais() {
+    const { data, error } = await supabase.from("pedidos_manuais")
+      .select("*").order("created_at", { ascending: false });
+    if (error) throw error;
+    setManuais((data || []) as PedidoManual[]);
+  }
+
+  async function salvarManual() {
+    if (!funcionario || ocupado) return;
+    const q = inteiro(formManual.quantidade);
+    if (!q || q < 1) { alert("Informe uma quantidade maior que zero."); return; }
+    if (formManual.categoria === "Outros" && !formManual.nome_produto.trim()) {
+      alert("Informe o nome do produto."); return;
+    }
+    if (formManual.categoria !== "Outros" && (!formManual.marca || !formManual.modelo.trim())) {
+      alert("Informe a marca e o modelo."); return;
+    }
+    if (formManual.categoria === "Películas" && !formManual.tipo.trim()) {
+      alert("Digite o tipo de película."); return;
+    }
+    setOcupado(true);
+    try {
+      const { error } = await supabase.from("pedidos_manuais").insert({
+        categoria: formManual.categoria,
+        marca: formManual.marca.trim() || null,
+        modelo: formManual.modelo.trim() || null,
+        nome_produto: formManual.categoria === "Outros" ? formManual.nome_produto.trim() : null,
+        publico: formManual.categoria === "Capas" ? formManual.publico : null,
+        tipo: formManual.categoria === "Outros" ? null : formManual.tipo.trim(),
+        descricao: formManual.categoria === "Outros" ? formManual.descricao.trim() : null,
+        quantidade: q,
+        status: "pendente",
+      });
+      if (error) throw error;
+      await carregarManuais();
+      setFormManual(manualVazio());
+      setMostrarManual(false);
+      alert("Pedido manual cadastrado!");
+    } catch (e) { alert(erroTexto(e)); }
+    finally { setOcupado(false); }
+  }
+
   async function carregarEspeciais() {
     const { data, error } = await supabase
       .from("pedidos_especiais")
@@ -968,6 +1043,7 @@ export default function App() {
   async function atualizarTudo() {
     const resultados = await Promise.allSettled([
       carregarEstoque(),
+      carregarManuais(),
       carregarEspeciais(),
       carregarPecas(),
       carregarInformacoes(),
@@ -1073,6 +1149,7 @@ export default function App() {
     setProdutos([]);
     setVariacoes([]);
     setEspeciais([]);
+    setManuais([]);
     setPecas([]);
     setInformacoes([]);
   }
@@ -1089,6 +1166,9 @@ export default function App() {
 
     if (destino === "estoque" || destino === "pedidos") {
       void carregarEstoque().catch((e) => alert(erroTexto(e)));
+    }
+    if (destino === "pedidos") {
+      void carregarManuais().catch((e) => alert(erroTexto(e)));
     }
 
     if (destino === "pedidos_especiais") {
@@ -1231,10 +1311,12 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
 
   
 
+  const manuaisPendentes = manuais.filter(m => m.status === "pendente");
+  const manuaisFeitos = manuais.filter(m => m.status === "pedido_feito");
   const totalComprar = pedidos.reduce(
-    (s, v) => s + Number(v.quantidade_comprar || 0),
-    0
-  );
+    (s, v) => s + Number(v.quantidade_comprar || 0), 0
+  ) + manuais.filter(m => m.status !== "recebido")
+    .reduce((s, m) => s + Number(m.quantidade || 0), 0);
 
   function totalPublico(itens: Variacao[], publico: Publico) {
     return itens
@@ -1547,34 +1629,42 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
       pendentes.some((v) => v.id === id)
     );
 
-    if (!ids.length) {
+    const manuaisIds = selecionados.filter(id => manuaisPendentes.some(m => m.id === id));
+    if (!ids.length && !manuaisIds.length) {
       alert("Selecione pedidos pendentes.");
       return;
     }
 
-    if (!confirm(`Marcar ${ids.length} item(ns) como pedidos feitos?`)) {
+    if (!confirm(`Marcar ${ids.length + manuaisIds.length} item(ns) como pedidos feitos?`)) {
       return;
     }
 
     setOcupado(true);
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = ids.length ? await supabase
         .from("estoque_variacoes")
         .update({
           status_pedido: "pedido_feito",
           updated_at: new Date().toISOString(),
         })
         .in("id", ids)
-        .select("id");
+        .select("id") : { data: [], error: null };
 
       if (error) throw error;
       if (data?.length !== ids.length) {
         throw new Error("Nem todos os pedidos foram atualizados.");
       }
+      if (manuaisIds.length) {
+        const { data: dm, error: em } = await supabase.from("pedidos_manuais")
+          .update({ status: "pedido_feito" }).in("id", manuaisIds)
+          .eq("status", "pendente").select("id");
+        if (em) throw em;
+        if ((dm || []).length !== manuaisIds.length) throw new Error("Alguns pedidos manuais não foram atualizados.");
+      }
 
       setSelecionados([]);
-      await carregarEstoque();
+      await Promise.all([carregarEstoque(), carregarManuais()]);
 
       alert("Pedidos marcados como feitos!");
     } catch (erro) {
@@ -1591,14 +1681,15 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
       comprados.some((v) => v.id === id)
     );
 
-    if (!ids.length) {
+    const manuaisIds = selecionados.filter(id => manuaisFeitos.some(m => m.id === id));
+    if (!ids.length && !manuaisIds.length) {
       alert("Selecione pedidos já realizados.");
       return;
     }
 
     if (
       !confirm(
-        `Os ${ids.length} item(ns) selecionados chegaram?\n\n` +
+        `Os ${ids.length + manuaisIds.length} item(ns) selecionados chegaram?\n\n` +
           "OK = Sim, chegaram.\n" +
           "Cancelar = Não, manter na lista."
       )
@@ -1637,10 +1728,19 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
         }
       }
 
+      if (manuaisIds.length) {
+        const { data: dm, error: em } = await supabase.from("pedidos_manuais")
+          .update({ status: "recebido" }).in("id", manuaisIds)
+          .eq("status", "pedido_feito").select("id");
+        if (em) throw em;
+        if ((dm || []).length !== manuaisIds.length) throw new Error("Alguns pedidos manuais não foram atualizados.");
+      }
       setSelecionados([]);
-      await carregarEstoque();
+      await Promise.all([carregarEstoque(), carregarManuais()]);
 
-      alert("Produtos recebidos e adicionados ao estoque!");
+      alert(manuaisIds.length
+        ? "Recebimento confirmado! Os itens automáticos entraram no estoque. Lance manualmente no estoque os itens de pedidos manuais."
+        : "Produtos recebidos e adicionados ao estoque!");
     } catch (erro) {
       alert(
         "Não foi possível concluir todos os recebimentos: " +
@@ -2106,6 +2206,32 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
             </label>
           );
         })}
+      </div>
+    );
+  }
+
+  function tabelaManuais(itens: PedidoManual[]) {
+    return (
+      <div style={{ ...S.card, padding: 0, overflow: "hidden" }}>
+        {itens.map((m, i) => (
+          <label key={m.id} style={{ display: "flex", alignItems: "center", gap: 10,
+            padding: 12, borderBottom: i < itens.length - 1 ? "1px solid #253040" : "none" }}>
+            <input type="checkbox" disabled={!funcionario}
+              checked={selecionados.includes(m.id)}
+              onChange={e => setSelecionados(a => e.target.checked ? [...a, m.id] : a.filter(id => id !== m.id))}
+              style={{ width: 20, height: 20, accentColor: LARANJA, flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <strong style={{ display: "block", overflowWrap: "anywhere", fontSize: 14 }}>
+                {m.categoria === "Outros" ? m.nome_produto : m.modelo}
+              </strong>
+              <span style={S.pequeno}>
+                {m.categoria} · {[m.marca, m.publico, m.tipo, m.descricao].filter(Boolean).join(" · ")}
+              </span>
+              <div style={{ ...S.pequeno, color: LARANJA }}>Pedido manual</div>
+            </div>
+            <strong style={{ color: LARANJA, fontSize: 17 }}>{m.quantidade}</strong>
+          </label>
+        ))}
       </div>
     );
   }
@@ -3230,7 +3356,76 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
 
         {tela === "pedidos" && (
           <>
-            <h1 style={S.titulo}>Pedidos</h1>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h1 style={{ ...S.titulo, margin: 0 }}>Pedidos</h1>
+              {funcionario && <button type="button" aria-label="Novo pedido manual"
+                onClick={() => setMostrarManual(a => !a)}
+                style={{ ...S.principal, width: 45, height: 45, padding: 0, fontSize: 28 }}>
+                {mostrarManual ? "×" : "+"}
+              </button>}
+            </div>
+
+            {mostrarManual && funcionario && (
+              <section style={S.card}>
+                <h3>Novo pedido manual</h3>
+                <Campo rotulo="Categoria">
+                  <select style={S.input} value={formManual.categoria}
+                    onChange={e => setFormManual(() => ({ ...manualVazio(), categoria: e.target.value as Categoria }))}>
+                    {CATEGORIAS.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </Campo>
+                {formManual.categoria !== "Outros" ? <>
+                  <Campo rotulo="Marca">
+                    <select style={S.input} value={formManual.marca}
+                      onChange={e => setFormManual(a => ({ ...a, marca: e.target.value }))}>
+                      <option value="">Selecione</option>
+                      {MARCAS.map(m => <option key={m}>{m}</option>)}
+                    </select>
+                  </Campo>
+                  <Campo rotulo="Modelo">
+                    <input style={S.input} placeholder="Ex.: Redmi 15C" value={formManual.modelo}
+                      onChange={e => setFormManual(a => ({ ...a, modelo: e.target.value }))} />
+                  </Campo>
+                  {formManual.categoria === "Capas" ? <>
+                    <Campo rotulo="Público / estilo">
+                      <select style={S.input} value={formManual.publico}
+                        onChange={e => setFormManual(a => ({ ...a, publico: e.target.value }))}>
+                        {["Feminina", "Masculina", "Transparente"].map(v => <option key={v}>{v}</option>)}
+                      </select>
+                    </Campo>
+                    <Campo rotulo="Tipo">
+                      <select style={S.input} value={formManual.tipo}
+                        onChange={e => setFormManual(a => ({ ...a, tipo: e.target.value }))}>
+                        {["Decorado", "Case"].map(v => <option key={v}>{v}</option>)}
+                      </select>
+                    </Campo>
+                  </> : <Campo rotulo="Tipo de película (digite livremente)">
+                    <input style={S.input} value={formManual.tipo} placeholder="Ex.: 9D, fosca, privacidade"
+                      onChange={e => setFormManual(a => ({ ...a, tipo: e.target.value }))} />
+                  </Campo>}
+                </> : <>
+                  <Campo rotulo="Nome do produto">
+                    <input style={S.input} value={formManual.nome_produto} placeholder="Ex.: Carregador 25W"
+                      onChange={e => setFormManual(a => ({ ...a, nome_produto: e.target.value }))} />
+                  </Campo>
+                  <Campo rotulo="Marca (opcional)">
+                    <input style={S.input} value={formManual.marca}
+                      onChange={e => setFormManual(a => ({ ...a, marca: e.target.value }))} />
+                  </Campo>
+                  <Campo rotulo="Descrição / modelo (opcional)">
+                    <input style={S.input} value={formManual.descricao}
+                      onChange={e => setFormManual(a => ({ ...a, descricao: e.target.value }))} />
+                  </Campo>
+                </>}
+                <Campo rotulo="Quantidade">
+                  <input type="number" min="1" step="1" style={S.input} value={formManual.quantidade}
+                    onChange={e => setFormManual(a => ({ ...a, quantidade: e.target.value }))} />
+                </Campo>
+                <Botao disabled={ocupado} onClick={() => void salvarManual()} style={{ width: "100%" }}>
+                  Salvar pedido
+                </Botao>
+              </section>
+            )}
 
             <section style={S.card}>
               <div
@@ -3253,35 +3448,31 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
             </section>
 
             <h3 style={{ color: "#f0bf74" }}>
-              ● Pendentes ({pendentes.length})
+              ● Pendentes ({pendentes.length + manuaisPendentes.length})
             </h3>
 
-            {pendentes.length ? (
-              pedidosTabela(pendentes)
-            ) : (
-              <p style={S.pequeno}>
-                Nenhum pedido aguardando compra.
-              </p>
+            {pendentes.length > 0 && pedidosTabela(pendentes)}
+            {manuaisPendentes.length > 0 && tabelaManuais(manuaisPendentes)}
+            {!pendentes.length && !manuaisPendentes.length && (
+              <p style={S.pequeno}>Nenhum pedido aguardando compra.</p>
             )}
 
             <h3 style={{ color: "#7ddd95" }}>
-              ✓ Pedidos feitos ({comprados.length})
+              ✓ Pedidos feitos ({comprados.length + manuaisFeitos.length})
             </h3>
 
-            {comprados.length ? (
-              pedidosTabela(comprados)
-            ) : (
-              <p style={S.pequeno}>
-                Nenhum pedido aguardando chegada.
-              </p>
+            {comprados.length > 0 && pedidosTabela(comprados)}
+            {manuaisFeitos.length > 0 && tabelaManuais(manuaisFeitos)}
+            {!comprados.length && !manuaisFeitos.length && (
+              <p style={S.pequeno}>Nenhum pedido aguardando chegada.</p>
             )}
 
-            {funcionario && pedidos.length > 0 && (
+            {funcionario && (pedidos.length + manuaisPendentes.length + manuaisFeitos.length) > 0 && (
               <section style={S.card}>
                 <div style={{ ...S.linha, justifyContent: "space-between" }}>
                   <strong>
                     {selecionados.filter((id) =>
-                      pedidos.some((v) => v.id === id)
+                      pedidos.some((v) => v.id === id) || manuais.some(m => m.id === id && m.status !== "recebido")
                     ).length}{" "}
                     selecionados
                   </strong>
@@ -3290,11 +3481,10 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                     type="button"
                     onClick={() =>
                       setSelecionados(
-                        pedidos.every((v) =>
-                          selecionados.includes(v.id)
-                        )
+                        [...pedidos.map(v => v.id), ...manuais.filter(m => m.status !== "recebido").map(m => m.id)]
+                          .every(id => selecionados.includes(id))
                           ? []
-                          : pedidos.map((v) => v.id)
+                          : [...pedidos.map(v => v.id), ...manuais.filter(m => m.status !== "recebido").map(m => m.id)]
                       )
                     }
                     style={{
@@ -3314,7 +3504,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                   disabled={
                     ocupado ||
                     !selecionados.some((id) =>
-                      pendentes.some((v) => v.id === id)
+                      pendentes.some((v) => v.id === id) || manuaisPendentes.some(m => m.id === id)
                     )
                   }
                   onClick={() => void marcarPedidosFeitos()}
@@ -3328,7 +3518,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                   disabled={
                     ocupado ||
                     !selecionados.some((id) =>
-                      comprados.some((v) => v.id === id)
+                      comprados.some((v) => v.id === id) || manuaisFeitos.some(m => m.id === id)
                     )
                   }
                   onClick={() => void confirmarChegada()}
@@ -3436,10 +3626,11 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                 </p>
 
                 {funcionario && (
-                  <div style={S.linha}>
+                  <div style={{ ...S.linha, justifyContent: "center", gap: 10 }}>
                     {p.status === "pendente" && (
                       <Botao
                         disabled={ocupado}
+                        style={{ minWidth: 125, textAlign: "center" }}
                         onClick={() =>
                           void atualizarEspecial(p, "pedido_feito")
                         }
@@ -3451,6 +3642,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                     {p.status === "pedido_feito" && (
                       <Botao
                         disabled={ocupado}
+                        style={{ minWidth: 125, textAlign: "center" }}
                         onClick={() =>
                           void atualizarEspecial(p, "recebido")
                         }
@@ -3462,6 +3654,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                     <Botao
                       variante="perigo"
                       disabled={ocupado}
+                        style={{ minWidth: 125, textAlign: "center" }}
                       onClick={() => void excluirEspecial(p)}
                     >
                       Apagar
