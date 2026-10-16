@@ -1,9 +1,44 @@
-
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, ChangeEvent, ReactNode } from "react";
 import { supabase } from "./supabase";
+import TelaInicial from "./TelaInicial";
+import GaleriaCapinhas from "./GaleriaCapinhas";
 
 type Perfil = "admin" | "funcionario" | "";
-type Tela = "consultar" | "informacoes" | "cadastrar" | "todos";
+type Tela = "inicio" | "estoque" | "pecas" | "informacoes" | "pedidos" | "pedidos_especiais";
+type Categoria = "Capas" | "Películas" | "Outros";
+type Publico = "Feminino" | "Masculino" | "Unissex";
+type StatusEspecial = "pendente" | "pedido_feito" | "recebido";
+
+type Produto = {
+  id: string;
+  categoria: Categoria;
+  marca: string;
+  modelo: string;
+  imagem_url: string | null;
+  ativo: boolean;
+};
+
+type Variacao = {
+  id: string;
+  produto_id: string;
+  nome: string;
+  publico: Publico;
+  quantidade: number;
+  quantidade_comprar: number;
+  status_pedido: string;
+  imagem_url: string | null;
+};
+
+type Especial = {
+  id: string;
+  nome_cliente: string;
+  telefone: string;
+  modelo_aparelho: string;
+  descricao: string;
+  status: StatusEspecial;
+  created_at: string;
+};
 
 type Peca = {
   id: string;
@@ -13,75 +48,109 @@ type Peca = {
   qualidade: string;
   valor_custo: number;
   valor_final: number;
-  created_at?: string;
 };
 
 type Informacao = {
   id: string;
   titulo: string;
   conteudo: string;
-  created_at?: string;
 };
+
+type FormProduto = {
+  categoria: Categoria;
+  marca: string;
+  modelo: string;
+  imagem_url: string;
+};
+
+type FormVariacao = {
+  nome: string;
+  publico: Publico;
+  quantidade: string;
+  quantidade_comprar: string;
+  imagem_url: string;
+};
+
+type FormEspecial = {
+  nome_cliente: string;
+  telefone: string;
+  modelo_aparelho: string;
+  descricao: string;
+};
+
+type FormPeca = {
+  tipo_peca: string;
+  marca: string;
+  modelo: string;
+  qualidade: string;
+  valor_custo: string;
+  valor_final: string;
+};
+
+type Quantidades = {
+  quantidade: string;
+  quantidade_comprar: string;
+};
+
+const LARANJA = "#ff6600";
+const ROSA = "#ff4ca1";
+const AZUL = "#34a9ff";
 
 const EMAIL_ADMIN = "marcosvinicius95pnnn@gmail.com";
 const EMAIL_FUNCIONARIO = "funcionario@marcosmagazine.com.br";
 
 const MARCAS = ["Apple", "Samsung", "Xiaomi", "Motorola", "Realme"];
+const CATEGORIAS: Categoria[] = ["Capas", "Películas", "Outros"];
+const PUBLICOS: Publico[] = ["Feminino", "Masculino", "Unissex"];
+
+const TIPOS_PECAS = [
+  "Tela",
+  "Bateria",
+  "Conector de carga",
+  "Câmera",
+  "Tampa traseira",
+  "Flex",
+  "Alto-falante",
+  "Microfone",
+  "Película",
+  "Outro",
+];
+
 const QUALIDADES = [
-  "OLED", "LCD", "Premium", "Original Nacional",
-  "Peça genuína", "Peça não genuína",
-  "Subplaca tipo c", "Subplaca V8", "Conector",
+  "OLED",
+  "LCD",
+  "Premium",
+  "Original Nacional",
+  "Peça genuína",
+  "Peça não genuína",
+  "Subplaca tipo c",
+  "Subplaca V8",
+  "Conector",
 ];
-const TIPOS = [
-  "Tela", "Bateria", "Conector de carga", "Câmera",
-  "Tampa traseira", "Flex", "Alto-falante",
-  "Microfone", "Película", "Outro",
-];
 
-function normalizar(valor: string) {
-  return String(valor || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toLowerCase();
-}
+const produtoVazio = (categoria: Categoria = "Capas"): FormProduto => ({
+  categoria,
+  marca: "",
+  modelo: "",
+  imagem_url: "",
+});
 
-function dinheiro(valor: number | string) {
-  return Number(valor || 0).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  });
-}
+const variacaoVazia = (): FormVariacao => ({
+  nome: "",
+  publico: "Feminino",
+  quantidade: "0",
+  quantidade_comprar: "0",
+  imagem_url: "",
+});
 
-function converterNumero(valor: string) {
-  const limpo = valor.replace(/R\$/gi, "").replace(/\s/g, "");
-  return limpo.includes(",")
-    ? Number(limpo.replace(/\./g, "").replace(",", "."))
-    : Number(limpo);
-}
+const especialVazio = (): FormEspecial => ({
+  nome_cliente: "",
+  telefone: "",
+  modelo_aparelho: "",
+  descricao: "",
+});
 
-function logoMarca(marca: string) {
-  const m = normalizar(marca);
-  if (m.includes("apple")) return "";
-  if (m.includes("samsung")) return "S";
-  if (m.includes("xiaomi")) return "MI";
-  if (m.includes("motorola")) return "M";
-  if (m.includes("realme")) return "R";
-  return (marca || "MM").slice(0, 2).toUpperCase();
-}
-
-function corLogo(marca: string) {
-  const m = normalizar(marca);
-  if (m.includes("apple")) return "#f5f5f5";
-  if (m.includes("samsung")) return "#1d5eff";
-  if (m.includes("xiaomi")) return "#ff6600";
-  if (m.includes("motorola")) return "#24a4ff";
-  if (m.includes("realme")) return "#ffd500";
-  return "#ff6600";
-}
-
-const formularioVazio = () => ({
+const pecaVazia = (): FormPeca => ({
   tipo_peca: "",
   marca: "",
   modelo: "",
@@ -90,64 +159,788 @@ const formularioVazio = () => ({
   valor_final: "",
 });
 
+function normalizar(valor: string) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function erroTexto(erro: unknown) {
+  if (erro instanceof Error) return erro.message;
+
+  if (typeof erro === "object" && erro !== null && "message" in erro) {
+    return String(erro.message);
+  }
+
+  return String(erro);
+}
+
+function dinheiro(valor: number) {
+  return Number(valor || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
+function numero(valor: string) {
+  const texto = valor.replace(/R\$/gi, "").replace(/\s/g, "");
+
+  return texto.includes(",")
+    ? Number(texto.replace(/\./g, "").replace(",", "."))
+    : Number(texto);
+}
+
+function inteiro(valor: string) {
+  if (!/^\d+$/.test(valor.trim())) return null;
+
+  const n = Number(valor);
+
+  return Number.isSafeInteger(n) && n >= 0 ? n : null;
+}
+
+const S: Record<string, CSSProperties> = {
+  app: {
+    minHeight: "100dvh",
+    width: "100%",
+    overflowX: "hidden",
+    background: "#080b11",
+    color: "#f7f7f9",
+    fontFamily: "Arial, Helvetica, sans-serif",
+    boxSizing: "border-box",
+  },
+
+  topo: {
+    position: "sticky",
+    top: 0,
+    zIndex: 20,
+    minHeight: 67,
+    padding: "10px 13px",
+    background: "#090d14",
+    borderBottom: "1px solid #202733",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    boxSizing: "border-box",
+  },
+
+  conteudo: {
+    maxWidth: 1050,
+    width: "100%",
+    margin: "0 auto",
+    padding: "16px 12px 115px",
+    boxSizing: "border-box",
+  },
+
+  card: {
+    background: "#111722",
+    border: "1px solid #252e3d",
+    borderRadius: 15,
+    padding: 14,
+    marginBottom: 12,
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  input: {
+    width: "100%",
+    minWidth: 0,
+    minHeight: 45,
+    padding: "11px 12px",
+    borderRadius: 11,
+    border: "1px solid #313b4c",
+    background: "#0e1420",
+    color: "#fff",
+    fontSize: 16,
+    outlineColor: LARANJA,
+    boxSizing: "border-box",
+    fontFamily: "inherit",
+  },
+
+  principal: {
+    minHeight: 43,
+    padding: "10px 14px",
+    border: 0,
+    borderRadius: 10,
+    background: LARANJA,
+    color: "#fff",
+    fontWeight: 800,
+    fontSize: 14,
+    cursor: "pointer",
+  },
+
+  secundario: {
+    minHeight: 43,
+    padding: "10px 14px",
+    border: "1px solid #303a4b",
+    borderRadius: 10,
+    background: "#18202d",
+    color: "#fff",
+    fontWeight: 700,
+    fontSize: 14,
+    cursor: "pointer",
+  },
+
+  perigo: {
+    minHeight: 43,
+    padding: "10px 14px",
+    border: "1px solid #71343b",
+    borderRadius: 10,
+    background: "#391b23",
+    color: "#ffacb0",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+
+  linha: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+
+  titulo: {
+    fontSize: 22,
+    fontWeight: 800,
+    margin: "5px 0 14px",
+  },
+
+  pequeno: {
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: "#9da7b8",
+  },
+
+  nav: {
+    position: "fixed",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    background: "#0b1018",
+    borderTop: "1px solid #273040",
+    display: "grid",
+    gridTemplateColumns: "repeat(4,minmax(0,1fr))",
+    padding: "7px 5px calc(8px + env(safe-area-inset-bottom))",
+    boxSizing: "border-box",
+  },
+};
+
+function Campo({
+  rotulo,
+  children,
+}: {
+  rotulo: string;
+  children: ReactNode;
+}) {
+  return (
+    <label style={{ display: "block", marginBottom: 12, minWidth: 0 }}>
+      <span
+        style={{
+          display: "block",
+          color: "#abb4c2",
+          fontSize: 12,
+          marginBottom: 6,
+        }}
+      >
+        {rotulo}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function Botao({
+  children,
+  onClick,
+  variante = "principal",
+  disabled = false,
+  style,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  variante?: "principal" | "secundario" | "perigo";
+  disabled?: boolean;
+  style?: CSSProperties;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      style={{
+        ...(variante === "principal"
+          ? S.principal
+          : variante === "perigo"
+          ? S.perigo
+          : S.secundario),
+        opacity: disabled ? 0.45 : 1,
+        ...style,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Logo() {
+  return (
+    <div style={{ textAlign: "center", lineHeight: 0.9, flexShrink: 0 }}>
+      <div
+        style={{
+          fontSize: 27,
+          fontWeight: 900,
+          color: LARANJA,
+          letterSpacing: -1.5,
+        }}
+      >
+        Marcos
+      </div>
+      <div
+        style={{
+          fontSize: 12,
+          color: "#f5f5f5",
+          fontWeight: 700,
+          textAlign: "right",
+          marginRight: 4,
+        }}
+      >
+        magazine
+      </div>
+    </div>
+  );
+}
+
+function FotoBotoes({
+  url,
+  enviando,
+  camera,
+  galeria,
+}: {
+  url: string;
+  enviando: boolean;
+  camera: () => void;
+  galeria: () => void;
+}) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={S.linha}>
+        <Botao
+          variante="secundario"
+          disabled={enviando}
+          onClick={camera}
+          style={{ flex: "1 1 130px" }}
+        >
+          📷 Câmera
+        </Botao>
+
+        <Botao
+          variante="secundario"
+          disabled={enviando}
+          onClick={galeria}
+          style={{ flex: "1 1 130px" }}
+        >
+          🖼️ Galeria
+        </Botao>
+      </div>
+
+      {enviando && (
+        <p style={{ color: LARANJA, fontSize: 13 }}>
+          Enviando foto...
+        </p>
+      )}
+
+      {url && (
+        <img
+          src={url}
+          alt="Foto cadastrada"
+          style={{
+            width: "100%",
+            maxHeight: 190,
+            objectFit: "contain",
+            borderRadius: 12,
+            marginTop: 12,
+            background: "#080b11",
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function FormularioProduto({
+  form,
+  setForm,
+  editando,
+  ocupado,
+  enviando,
+  salvar,
+  cancelar,
+  camera,
+  galeria,
+}: {
+  form: FormProduto;
+  setForm: React.Dispatch<React.SetStateAction<FormProduto>>;
+  editando: boolean;
+  ocupado: boolean;
+  enviando: boolean;
+  salvar: () => void;
+  cancelar: () => void;
+  camera: () => void;
+  galeria: () => void;
+}) {
+  return (
+    <section style={S.card}>
+      <h3>{editando ? "Editar modelo" : "Novo modelo"}</h3>
+
+      <Campo rotulo="Categoria">
+        <select
+          style={S.input}
+          value={form.categoria}
+          onChange={(e) =>
+            setForm((a) => ({
+              ...a,
+              categoria: e.target.value as Categoria,
+            }))
+          }
+        >
+          {CATEGORIAS.map((c) => (
+            <option key={c}>{c}</option>
+          ))}
+        </select>
+      </Campo>
+
+      <Campo rotulo="Marca">
+        <select
+          style={S.input}
+          value={form.marca}
+          onChange={(e) =>
+            setForm((a) => ({ ...a, marca: e.target.value }))
+          }
+        >
+          <option value="">Selecione</option>
+          {MARCAS.map((m) => (
+            <option key={m}>{m}</option>
+          ))}
+        </select>
+      </Campo>
+
+      <Campo rotulo="Modelo">
+        <input
+          style={S.input}
+          value={form.modelo}
+          placeholder="Ex.: iPhone 17 Pro Max"
+          onChange={(e) =>
+            setForm((a) => ({ ...a, modelo: e.target.value }))
+          }
+        />
+      </Campo>
+
+      {form.categoria !== "Películas" && (
+        <FotoBotoes
+          url={form.imagem_url}
+          enviando={enviando}
+          camera={camera}
+          galeria={galeria}
+        />
+      )}
+
+      <Botao
+        disabled={ocupado || enviando}
+        onClick={salvar}
+        style={{ width: "100%" }}
+      >
+        Salvar modelo
+      </Botao>
+
+      <Botao
+        variante="secundario"
+        onClick={cancelar}
+        style={{ width: "100%", marginTop: 8 }}
+      >
+        Cancelar
+      </Botao>
+    </section>
+  );
+}
+
+function FormularioVariacao({
+  form,
+  setForm,
+  categoria,
+  editando,
+  ocupado,
+  enviando,
+  salvar,
+  cancelar,
+  camera,
+  galeria,
+}: {
+  form: FormVariacao;
+  setForm: React.Dispatch<React.SetStateAction<FormVariacao>>;
+  categoria: Categoria;
+  editando: boolean;
+  ocupado: boolean;
+  enviando: boolean;
+  salvar: () => void;
+  cancelar: () => void;
+  camera: () => void;
+  galeria: () => void;
+}) {
+  return (
+    <section style={S.card}>
+      <h3>{editando ? "Editar item" : "Cadastrar novo item"}</h3>
+
+      <Campo
+        rotulo={
+          categoria === "Películas"
+            ? "Tipo de película"
+            : "Nome da capinha ou item"
+        }
+      >
+        <input
+          style={S.input}
+          value={form.nome}
+          placeholder={
+            categoria === "Películas"
+              ? "Ex.: 3D, 9D, Privacidade"
+              : "Ex.: Coração Rosa"
+          }
+          onChange={(e) =>
+            setForm((a) => ({ ...a, nome: e.target.value }))
+          }
+        />
+      </Campo>
+
+      {categoria !== "Películas" && (
+        <Campo rotulo="Público">
+          <select
+            style={S.input}
+            value={form.publico}
+            onChange={(e) =>
+              setForm((a) => ({
+                ...a,
+                publico: e.target.value as Publico,
+              }))
+            }
+          >
+            {PUBLICOS.map((p) => (
+              <option key={p}>{p}</option>
+            ))}
+          </select>
+        </Campo>
+      )}
+
+      {categoria !== "Películas" && (
+        <FotoBotoes
+          url={form.imagem_url}
+          enviando={enviando}
+          camera={camera}
+          galeria={galeria}
+        />
+      )}
+
+      <Campo rotulo="Quantidade em estoque">
+        <input
+          style={S.input}
+          type="number"
+          min="0"
+          step="1"
+          value={form.quantidade}
+          onChange={(e) =>
+            setForm((a) => ({
+              ...a,
+              quantidade: e.target.value,
+            }))
+          }
+        />
+      </Campo>
+
+      <Campo rotulo="Precisa comprar">
+        <input
+          style={S.input}
+          type="number"
+          min="0"
+          step="1"
+          value={form.quantidade_comprar}
+          onChange={(e) =>
+            setForm((a) => ({
+              ...a,
+              quantidade_comprar: e.target.value,
+            }))
+          }
+        />
+      </Campo>
+
+      <Botao
+        disabled={ocupado || enviando}
+        onClick={salvar}
+        style={{ width: "100%" }}
+      >
+        {ocupado ? "Salvando..." : "Salvar item"}
+      </Botao>
+
+      {editando && (
+        <Botao
+          variante="secundario"
+          onClick={cancelar}
+          style={{ width: "100%", marginTop: 8 }}
+        >
+          Cancelar edição
+        </Botao>
+      )}
+    </section>
+  );
+}
+
+function ControleNumero({
+  valor,
+  alterar,
+  disabled,
+}: {
+  valor: string;
+  alterar: (valor: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 5,
+        minWidth: 0,
+      }}
+    >
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() =>
+          alterar(String(Math.max(0, Number(valor || 0) - 1)))
+        }
+        style={{
+          ...S.principal,
+          minHeight: 36,
+          width: 34,
+          padding: 0,
+          fontSize: 22,
+        }}
+      >
+        −
+      </button>
+
+      <input
+        type="number"
+        min="0"
+        step="1"
+        disabled={disabled}
+        value={valor}
+        onChange={(e) => alterar(e.target.value)}
+        style={{
+          ...S.input,
+          minHeight: 36,
+          height: 36,
+          width: 55,
+          padding: "4px 3px",
+          textAlign: "center",
+          fontSize: 15,
+          fontWeight: 800,
+        }}
+      />
+
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => alterar(String(Number(valor || 0) + 1))}
+        style={{
+          ...S.principal,
+          minHeight: 36,
+          width: 34,
+          padding: 0,
+          fontSize: 22,
+        }}
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+function FormularioEspecial({
+  form,
+  setForm,
+  salvar,
+  cancelar,
+  ocupado,
+}: {
+  form: FormEspecial;
+  setForm: React.Dispatch<React.SetStateAction<FormEspecial>>;
+  salvar: () => void;
+  cancelar: () => void;
+  ocupado: boolean;
+}) {
+  return (
+    <section style={S.card}>
+      <h3>Novo pedido especial</h3>
+
+      {(
+        [
+          ["nome_cliente", "Nome do cliente"],
+          ["telefone", "Telefone"],
+          ["modelo_aparelho", "Modelo do aparelho"],
+        ] as [keyof FormEspecial, string][]
+      ).map(([campo, rotulo]) => (
+        <Campo key={campo} rotulo={rotulo}>
+          <input
+            style={S.input}
+            type={campo === "telefone" ? "tel" : "text"}
+            value={form[campo]}
+            onChange={(e) =>
+              setForm((a) => ({
+                ...a,
+                [campo]: e.target.value,
+              }))
+            }
+          />
+        </Campo>
+      ))}
+
+      <Campo rotulo="Descrição">
+        <textarea
+          style={{ ...S.input, minHeight: 100 }}
+          value={form.descricao}
+          onChange={(e) =>
+            setForm((a) => ({
+              ...a,
+              descricao: e.target.value,
+            }))
+          }
+        />
+      </Campo>
+
+      <Botao
+        disabled={ocupado}
+        onClick={salvar}
+        style={{ width: "100%" }}
+      >
+        Salvar pedido
+      </Botao>
+
+      <Botao
+        variante="secundario"
+        onClick={cancelar}
+        style={{ width: "100%", marginTop: 8 }}
+      >
+        Cancelar
+      </Botao>
+    </section>
+  );
+}
+
 export default function App() {
   const [verificando, setVerificando] = useState(true);
   const [logado, setLogado] = useState(false);
   const [perfil, setPerfil] = useState<Perfil>("");
+
   const [usuario, setUsuario] = useState("");
   const [senha, setSenha] = useState("");
   const [entrando, setEntrando] = useState(false);
-  const [tela, setTela] = useState<Tela>("consultar");
+  const [ocupado, setOcupado] = useState(false);
 
+  const [tela, setTela] = useState<Tela>("inicio");
+  const [menuAberto, setMenuAberto] = useState(false);
+
+  const [produtos, setProdutos] = useState<Produto[]>([]);
+  const [variacoes, setVariacoes] = useState<Variacao[]>([]);
+  const [especiais, setEspeciais] = useState<Especial[]>([]);
   const [pecas, setPecas] = useState<Peca[]>([]);
-  const [resultados, setResultados] = useState<Peca[]>([]);
-  const [tipoPeca, setTipoPeca] = useState("");
-  const [marca, setMarca] = useState("");
-  const [modelo, setModelo] = useState("");
-  const [digitarModelo, setDigitarModelo] = useState(false);
-  const [novaPeca, setNovaPeca] = useState(formularioVazio());
-  const [editandoId, setEditandoId] = useState<string | null>(null);
-  const [pagina, setPagina] = useState(1);
-  const [carregando, setCarregando] = useState(false);
-
   const [informacoes, setInformacoes] = useState<Informacao[]>([]);
+
+  const [categoria, setCategoria] = useState<Categoria>("Capas");
+  const [marcaFiltro, setMarcaFiltro] = useState("");
+  const [busca, setBusca] = useState("");
+  const [filtroAberto, setFiltroAberto] = useState(false);
+
+  const [produtoAbertoId, setProdutoAbertoId] = useState<string | null>(null);
+  const [publicoFiltro, setPublicoFiltro] = useState<Publico>("Feminino");
+
+  const [mostrarProduto, setMostrarProduto] = useState(false);
+  const [editandoProduto, setEditandoProduto] = useState<string | null>(null);
+  const [formProduto, setFormProduto] = useState<FormProduto>(produtoVazio());
+
+  const [mostrarVariacao, setMostrarVariacao] = useState(false);
+  const [editandoVariacao, setEditandoVariacao] = useState<string | null>(null);
+  const [formVariacao, setFormVariacao] = useState<FormVariacao>(variacaoVazia());
+
+  const [rascunhos, setRascunhos] = useState<Record<string, Quantidades>>({});
+  const [selecionados, setSelecionados] = useState<string[]>([]);
+
+  const [mostrarEspecial, setMostrarEspecial] = useState(false);
+  const [formEspecial, setFormEspecial] = useState<FormEspecial>(especialVazio());
+
+  const [secaoPecas, setSecaoPecas] = useState<"consultar" | "cadastrar" | "todos">("consultar");
+  const [formPeca, setFormPeca] = useState<FormPeca>(pecaVazia());
+  const [editandoPeca, setEditandoPeca] = useState<string | null>(null);
+
+  const [tipoPeca, setTipoPeca] = useState("");
+  const [marcaPeca, setMarcaPeca] = useState("");
+  const [modeloPeca, setModeloPeca] = useState("");
+  const [pesquisouPecas, setPesquisouPecas] = useState(false);
+  const [paginaPecas, setPaginaPecas] = useState(1);
+
   const [tituloInfo, setTituloInfo] = useState("");
   const [conteudoInfo, setConteudoInfo] = useState("");
   const [editandoInfo, setEditandoInfo] = useState<string | null>(null);
-  const [salvandoInfo, setSalvandoInfo] = useState(false);
-  const [erroInfo, setErroInfo] = useState("");
 
-  const porPagina = 5;
+  const [enviandoFoto, setEnviandoFoto] = useState(false);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galeriaRef = useRef<HTMLInputElement>(null);
+  const destinoFotoRef = useRef<"produto" | "variacao">("produto");
 
-  const modelosDisponiveis = useMemo(() => {
-    const encontrados = new Map<string, string>();
-    for (const peca of pecas) {
-      if (marca && normalizar(peca.marca) !== normalizar(marca)) continue;
-      const nome = (peca.modelo || "").trim();
-      const chave = normalizar(nome);
-      if (nome && !encontrados.has(chave)) {
-        encontrados.set(chave, nome);
-      }
-    }
-    return Array.from(encontrados.values()).sort((a, b) =>
-      a.localeCompare(b, "pt-BR", { numeric: true })
-    );
-  }, [pecas, marca]);
+  const admin = perfil === "admin";
+  const funcionario = perfil === "funcionario";
 
-  async function carregarPerfil(usuarioId: string): Promise<Perfil> {
+  async function carregarPerfil(id: string): Promise<Perfil> {
     const { data, error } = await supabase
       .from("perfis")
       .select("perfil")
-      .eq("usuario_id", usuarioId)
+      .eq("usuario_id", id)
       .single();
 
     if (error || !data) {
-      throw new Error("Usuário sem perfil autorizado no Supabase.");
+      throw new Error("Usuário sem perfil autorizado.");
     }
+
     if (data.perfil !== "admin" && data.perfil !== "funcionario") {
-      throw new Error("Perfil de acesso inválido.");
+      throw new Error("Perfil inválido.");
     }
-    return data.perfil as Perfil;
+
+    return data.perfil;
+  }
+
+  async function carregarEstoque() {
+    const [p, v] = await Promise.all([
+      supabase.from("estoque_produtos").select("*").order("modelo"),
+      supabase.from("estoque_variacoes").select("*").order("nome"),
+    ]);
+
+    if (p.error) throw p.error;
+    if (v.error) throw v.error;
+
+    setProdutos((p.data || []) as Produto[]);
+    setVariacoes((v.data || []) as Variacao[]);
+  }
+
+  async function carregarEspeciais() {
+    const { data, error } = await supabase
+      .from("pedidos_especiais")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    setEspeciais((data || []) as Especial[]);
   }
 
   async function carregarPecas() {
@@ -156,49 +949,974 @@ export default function App() {
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (error) {
-      alert("Erro ao carregar peças: " + error.message);
-      return;
-    }
+    if (error) throw error;
+
     setPecas((data || []) as Peca[]);
   }
 
   async function carregarInformacoes() {
     const { data, error } = await supabase
       .from("informacoes")
-      .select("id,titulo,conteudo,created_at")
+      .select("*")
       .order("created_at", { ascending: false });
 
-    if (error) {
-      setErroInfo("Erro ao carregar informações: " + error.message);
-      return;
-    }
-    setErroInfo("");
+    if (error) throw error;
+
     setInformacoes((data || []) as Informacao[]);
   }
 
-  function limparInformacao() {
+  async function atualizarTudo() {
+    const resultados = await Promise.allSettled([
+      carregarEstoque(),
+      carregarEspeciais(),
+      carregarPecas(),
+      carregarInformacoes(),
+    ]);
+
+    resultados.forEach((r) => {
+      if (r.status === "rejected") console.error(r.reason);
+    });
+  }
+
+  useEffect(() => {
+    let ativo = true;
+
+    async function verificar() {
+      try {
+        const { data, error } = await supabase.auth.getUser();
+
+        if (error || !data.user) return;
+
+        const encontrado = await carregarPerfil(data.user.id);
+
+        if (!ativo) return;
+
+        setPerfil(encontrado);
+        setLogado(true);
+
+        await atualizarTudo();
+      } catch (erro) {
+        console.error(erro);
+      } finally {
+        if (ativo) setVerificando(false);
+      }
+    }
+
+    void verificar();
+
+    return () => {
+      ativo = false;
+    };
+  }, []);
+
+  async function entrar() {
+    if (!usuario.trim() || !senha) {
+      alert("Informe usuário e senha.");
+      return;
+    }
+
+    setEntrando(true);
+
+    try {
+      const nome = usuario.trim().toLowerCase().replace(/^@/, "");
+
+      let email = usuario.trim();
+
+      if (nome === "admin") email = EMAIL_ADMIN;
+      if (nome === "funcionario") email = EMAIL_FUNCIONARIO;
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password: senha,
+      });
+
+      if (error || !data.user) {
+        throw new Error("Usuário ou senha incorretos.");
+      }
+
+      let encontrado: Perfil;
+
+      try {
+        encontrado = await carregarPerfil(data.user.id);
+      } catch (erro) {
+        await supabase.auth.signOut();
+        throw erro;
+      }
+
+      setPerfil(encontrado);
+      setLogado(true);
+      setTela("inicio");
+      setSenha("");
+
+      await atualizarTudo();
+    } catch (erro) {
+      alert(erroTexto(erro));
+    } finally {
+      setEntrando(false);
+    }
+  }
+
+  async function sair() {
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setLogado(false);
+    setPerfil("");
+    setUsuario("");
+    setSenha("");
+    setTela("inicio");
+    setMenuAberto(false);
+    setProdutos([]);
+    setVariacoes([]);
+    setEspeciais([]);
+    setPecas([]);
+    setInformacoes([]);
+  }
+
+  function navegar(destino: Tela) {
+    setTela(destino);
+    setMenuAberto(false);
+    setProdutoAbertoId(null);
+    setMostrarVariacao(false);
+    setMostrarProduto(false);
+    setRascunhos({});
+
+    window.scrollTo(0, 0);
+
+    if (destino === "estoque" || destino === "pedidos") {
+      void carregarEstoque().catch((e) => alert(erroTexto(e)));
+    }
+
+    if (destino === "pedidos_especiais") {
+      void carregarEspeciais().catch((e) => alert(erroTexto(e)));
+    }
+
+    if (destino === "pecas") {
+      void carregarPecas().catch((e) => alert(erroTexto(e)));
+    }
+
+    if (destino === "informacoes") {
+      void carregarInformacoes().catch((e) => alert(erroTexto(e)));
+    }
+  }
+
+  function escolherFoto(
+    destino: "produto" | "variacao",
+    origem: "camera" | "galeria"
+  ) {
+    if (!funcionario || enviandoFoto) return;
+
+    destinoFotoRef.current = destino;
+
+    if (origem === "camera") {
+      if (cameraRef.current) cameraRef.current.value = "";
+      cameraRef.current?.click();
+    } else {
+      if (galeriaRef.current) galeriaRef.current.value = "";
+      galeriaRef.current?.click();
+    }
+  }
+
+  async function receberFoto(evento: ChangeEvent<HTMLInputElement>) {
+    const arquivo = evento.target.files?.[0];
+
+    if (!arquivo || !funcionario) return;
+
+    if (!arquivo.type.startsWith("image/")) {
+      alert("Escolha uma imagem válida.");
+      return;
+    }
+
+    if (arquivo.size > 10 * 1024 * 1024) {
+      alert("A imagem deve ter no máximo 10 MB.");
+      return;
+    }
+
+    setEnviandoFoto(true);
+
+    try {
+      const extensao = (arquivo.name.split(".").pop() || "jpg")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
+      const caminho = `estoque/${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}.${extensao || "jpg"}`;
+
+      const { error } = await supabase.storage
+        .from("estoque-fotos")
+        .upload(caminho, arquivo, {
+          contentType: arquivo.type || "image/jpeg",
+          upsert: false,
+        });
+
+      if (error) throw error;
+
+      const { data } = supabase.storage
+        .from("estoque-fotos")
+        .getPublicUrl(caminho);
+
+      if (destinoFotoRef.current === "produto") {
+        setFormProduto((a) => ({
+          ...a,
+          imagem_url: data.publicUrl,
+        }));
+      } else {
+        setFormVariacao((a) => ({
+          ...a,
+          imagem_url: data.publicUrl,
+        }));
+      }
+
+      alert("Foto enviada! Agora salve o cadastro.");
+    } catch (erro) {
+      alert("Erro ao enviar foto: " + erroTexto(erro));
+    } finally {
+      setEnviandoFoto(false);
+      evento.target.value = "";
+    }
+  }
+const [abrirGaleria, setAbrirGaleria] = useState(false);
+  const produtoAberto =
+    produtos.find((p) => p.id === produtoAbertoId) || null;
+
+  const produtosFiltrados = useMemo(
+    () =>
+      produtos.filter(
+        (p) =>
+          p.ativo &&
+          p.categoria === categoria &&
+          (!marcaFiltro ||
+            normalizar(p.marca) === normalizar(marcaFiltro)) &&
+          normalizar(`${p.marca} ${p.modelo}`).includes(normalizar(busca))
+      ),
+    [produtos, categoria, marcaFiltro, busca]
+  );
+
+  const variacoesProduto = variacoes.filter(
+    (v) => v.produto_id === produtoAbertoId
+  );
+
+  const variacoesVisiveis = variacoesProduto.filter(
+    (v) =>
+      produtoAberto?.categoria === "Películas" ||
+      v.publico === publicoFiltro
+  );
+
+  const pedidos = variacoes
+    .filter((v) => Number(v.quantidade_comprar) > 0)
+    .sort((a, b) => {
+      const aFeito = a.status_pedido === "pedido_feito" ? 1 : 0;
+      const bFeito = b.status_pedido === "pedido_feito" ? 1 : 0;
+
+      if (aFeito !== bFeito) return aFeito - bFeito;
+
+      const nomeA = produtos.find((p) => p.id === a.produto_id)?.modelo || "";
+      const nomeB = produtos.find((p) => p.id === b.produto_id)?.modelo || "";
+
+      return nomeA.localeCompare(nomeB, "pt-BR", { numeric: true });
+    });
+
+  const pendentes = pedidos.filter(
+    (v) => v.status_pedido !== "pedido_feito"
+  );
+
+  const comprados = pedidos.filter(
+    (v) => v.status_pedido === "pedido_feito"
+  );
+
+  
+
+  const totalComprar = pedidos.reduce(
+    (s, v) => s + Number(v.quantidade_comprar || 0),
+    0
+  );
+
+  function totalPublico(itens: Variacao[], publico: Publico) {
+    return itens
+      .filter((v) => v.publico === publico)
+      .reduce((s, v) => s + Number(v.quantidade || 0), 0);
+  }
+
+  function limparProduto() {
+    setFormProduto(produtoVazio(categoria));
+    setEditandoProduto(null);
+    setMostrarProduto(false);
+  }
+
+  function limparVariacao() {
+    setFormVariacao(variacaoVazia());
+    setEditandoVariacao(null);
+    setMostrarVariacao(false);
+  }
+
+  function abrirProduto(p: Produto) {
+    setProdutoAbertoId(p.id);
+    setAbrirGaleria(p.categoria === "Capas");
+    setPublicoFiltro("Feminino");
+    setRascunhos({});
+    limparVariacao();
+    setMostrarProduto(false);
+    window.scrollTo(0, 0);
+  }
+
+  async function salvarProduto() {
+    if (!funcionario || ocupado || enviandoFoto) return;
+
+    if (!formProduto.marca.trim() || !formProduto.modelo.trim()) {
+      alert("Informe a marca e o modelo.");
+      return;
+    }
+
+    setOcupado(true);
+
+    try {
+      const dados = {
+        categoria: formProduto.categoria,
+        marca: formProduto.marca.trim(),
+        modelo: formProduto.modelo.trim(),
+        imagem_url:
+          formProduto.categoria === "Películas"
+            ? null
+            : formProduto.imagem_url.trim() || null,
+      };
+
+      const resposta = editandoProduto
+        ? await supabase
+            .from("estoque_produtos")
+            .update(dados)
+            .eq("id", editandoProduto)
+            .select("id")
+        : await supabase
+            .from("estoque_produtos")
+            .insert(dados)
+            .select("id");
+
+      if (resposta.error) throw resposta.error;
+      if (!resposta.data?.length) {
+        throw new Error("Gravação não autorizada.");
+      }
+
+      setCategoria(dados.categoria);
+      limparProduto();
+      await carregarEstoque();
+
+      alert("Modelo salvo!");
+    } catch (erro) {
+      alert(erroTexto(erro));
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  function editarProduto(p: Produto) {
+    if (!funcionario) return;
+
+    setEditandoProduto(p.id);
+    setFormProduto({
+      categoria: p.categoria,
+      marca: p.marca,
+      modelo: p.modelo,
+      imagem_url: p.imagem_url || "",
+    });
+
+    setMostrarProduto(true);
+    setProdutoAbertoId(null);
+    window.scrollTo(0, 0);
+  }
+
+  async function excluirProduto(p: Produto) {
+    if (!funcionario) return;
+
+    if (!confirm(`Excluir ${p.modelo} e suas variações?`)) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("estoque_produtos")
+        .delete()
+        .eq("id", p.id)
+        .select("id");
+
+      if (error) throw error;
+      if (!data?.length) throw new Error("Exclusão não autorizada.");
+
+      setProdutoAbertoId(null);
+      await carregarEstoque();
+    } catch (erro) {
+      alert(erroTexto(erro));
+    }
+  }
+
+  async function salvarVariacao() {
+    if (!funcionario || !produtoAberto || ocupado || enviandoFoto) return;
+
+    const quantidade = inteiro(formVariacao.quantidade);
+    const comprar = inteiro(formVariacao.quantidade_comprar);
+
+    if (!formVariacao.nome.trim()) {
+      alert("Informe o nome do item.");
+      return;
+    }
+
+    if (quantidade === null || comprar === null) {
+      alert("Informe quantidades inteiras válidas.");
+      return;
+    }
+
+    setOcupado(true);
+
+    try {
+      const anterior = variacoes.find(
+        (v) => v.id === editandoVariacao
+      );
+
+      const dados = {
+        produto_id: produtoAberto.id,
+        nome: formVariacao.nome.trim(),
+        publico:
+          produtoAberto.categoria === "Películas"
+            ? ("Unissex" as Publico)
+            : formVariacao.publico,
+        quantidade,
+        quantidade_comprar: comprar,
+        imagem_url:
+          produtoAberto.categoria === "Películas"
+            ? null
+            : formVariacao.imagem_url.trim() || null,
+        status_pedido:
+          comprar === 0
+            ? "pendente"
+            : anterior?.status_pedido === "pedido_feito" &&
+              comprar === Number(anterior.quantidade_comprar)
+            ? "pedido_feito"
+            : "pendente",
+        updated_at: new Date().toISOString(),
+      };
+
+      const resposta = editandoVariacao
+        ? await supabase
+            .from("estoque_variacoes")
+            .update(dados)
+            .eq("id", editandoVariacao)
+            .select("id")
+        : await supabase
+            .from("estoque_variacoes")
+            .insert(dados)
+            .select("id");
+
+      if (resposta.error) throw resposta.error;
+      if (!resposta.data?.length) {
+        throw new Error("Gravação não autorizada.");
+      }
+
+      limparVariacao();
+      setRascunhos({});
+      await carregarEstoque();
+
+      alert("Item salvo!");
+    } catch (erro) {
+      alert(erroTexto(erro));
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  function editarVariacao(v: Variacao) {
+    if (!funcionario) return;
+
+    setEditandoVariacao(v.id);
+    setFormVariacao({
+      nome: v.nome,
+      publico: v.publico,
+      quantidade: String(v.quantidade),
+      quantidade_comprar: String(v.quantidade_comprar),
+      imagem_url: v.imagem_url || "",
+    });
+
+    setMostrarVariacao(true);
+  }
+
+  async function excluirVariacao(v: Variacao) {
+    if (!funcionario || !confirm(`Excluir ${v.nome}?`)) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("estoque_variacoes")
+        .delete()
+        .eq("id", v.id)
+        .select("id");
+
+      if (error) throw error;
+      if (!data?.length) throw new Error("Exclusão não autorizada.");
+
+      limparVariacao();
+      await carregarEstoque();
+    } catch (erro) {
+      alert(erroTexto(erro));
+    }
+  }
+
+  function alterarRascunho(
+    v: Variacao,
+    campo: keyof Quantidades,
+    valor: string
+  ) {
+    setRascunhos((a) => ({
+      ...a,
+      [v.id]: {
+        quantidade: a[v.id]?.quantidade ?? String(v.quantidade),
+        quantidade_comprar:
+          a[v.id]?.quantidade_comprar ??
+          String(v.quantidade_comprar),
+        [campo]: valor,
+      },
+    }));
+  }
+
+  async function salvarQuantidades() {
+    if (!funcionario || ocupado) return;
+
+    const entradas = Object.entries(rascunhos);
+
+    if (!entradas.length) {
+      alert("Nenhuma quantidade foi alterada.");
+      return;
+    }
+
+    for (const [, valores] of entradas) {
+      if (
+        inteiro(valores.quantidade) === null ||
+        inteiro(valores.quantidade_comprar) === null
+      ) {
+        alert("Informe quantidades inteiras válidas.");
+        return;
+      }
+    }
+
+    setOcupado(true);
+
+    try {
+      for (const [id, valores] of entradas) {
+        const anterior = variacoes.find((v) => v.id === id);
+        if (!anterior) continue;
+
+        const comprar = inteiro(valores.quantidade_comprar)!;
+
+        const { data, error } = await supabase
+          .from("estoque_variacoes")
+          .update({
+            quantidade: inteiro(valores.quantidade)!,
+            quantidade_comprar: comprar,
+            status_pedido:
+              comprar === 0
+                ? "pendente"
+                : comprar === Number(anterior.quantidade_comprar)
+                ? anterior.status_pedido
+                : "pendente",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", id)
+          .select("id");
+
+        if (error) throw error;
+        if (!data?.length) {
+          throw new Error("Atualização não autorizada.");
+        }
+      }
+
+      setRascunhos({});
+      await carregarEstoque();
+
+      alert("Estoque atualizado!");
+    } catch (erro) {
+      alert("Erro ao atualizar: " + erroTexto(erro));
+      await carregarEstoque();
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function marcarPedidosFeitos() {
+    if (!funcionario || ocupado) return;
+
+    const ids = selecionados.filter((id) =>
+      pendentes.some((v) => v.id === id)
+    );
+
+    if (!ids.length) {
+      alert("Selecione pedidos pendentes.");
+      return;
+    }
+
+    if (!confirm(`Marcar ${ids.length} item(ns) como pedidos feitos?`)) {
+      return;
+    }
+
+    setOcupado(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("estoque_variacoes")
+        .update({
+          status_pedido: "pedido_feito",
+          updated_at: new Date().toISOString(),
+        })
+        .in("id", ids)
+        .select("id");
+
+      if (error) throw error;
+      if (data?.length !== ids.length) {
+        throw new Error("Nem todos os pedidos foram atualizados.");
+      }
+
+      setSelecionados([]);
+      await carregarEstoque();
+
+      alert("Pedidos marcados como feitos!");
+    } catch (erro) {
+      alert(erroTexto(erro));
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function confirmarChegada() {
+    if (!funcionario || ocupado) return;
+
+    const ids = selecionados.filter((id) =>
+      comprados.some((v) => v.id === id)
+    );
+
+    if (!ids.length) {
+      alert("Selecione pedidos já realizados.");
+      return;
+    }
+
+    if (
+      !confirm(
+        `Os ${ids.length} item(ns) selecionados chegaram?\n\n` +
+          "OK = Sim, chegaram.\n" +
+          "Cancelar = Não, manter na lista."
+      )
+    ) {
+      return;
+    }
+
+    setOcupado(true);
+
+    try {
+      for (const id of ids) {
+        const v = variacoes.find((item) => item.id === id);
+        if (!v) continue;
+
+        const { data, error } = await supabase
+          .from("estoque_variacoes")
+          .update({
+            quantidade:
+              Number(v.quantidade) + Number(v.quantidade_comprar),
+            quantidade_comprar: 0,
+            status_pedido: "pendente",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", id)
+          .eq("quantidade", v.quantidade)
+          .eq("quantidade_comprar", v.quantidade_comprar)
+          .eq("status_pedido", "pedido_feito")
+          .select("id");
+
+        if (error) throw error;
+
+        if (!data?.length) {
+          throw new Error(
+            "Um pedido foi alterado. Atualize a lista antes de continuar."
+          );
+        }
+      }
+
+      setSelecionados([]);
+      await carregarEstoque();
+
+      alert("Produtos recebidos e adicionados ao estoque!");
+    } catch (erro) {
+      alert(
+        "Não foi possível concluir todos os recebimentos: " +
+          erroTexto(erro)
+      );
+      await carregarEstoque();
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function salvarEspecial() {
+    if (!funcionario || ocupado) return;
+
+    if (Object.values(formEspecial).some((v) => !v.trim())) {
+      alert("Preencha todos os campos.");
+      return;
+    }
+
+    setOcupado(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("pedidos_especiais")
+        .insert({
+          ...formEspecial,
+          status: "pendente",
+        })
+        .select("id");
+
+      if (error) throw error;
+      if (!data?.length) throw new Error("Cadastro não autorizado.");
+
+      setFormEspecial(especialVazio());
+      setMostrarEspecial(false);
+      await carregarEspeciais();
+
+      alert("Pedido especial cadastrado!");
+    } catch (erro) {
+      alert(erroTexto(erro));
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function atualizarEspecial(
+    p: Especial,
+    status: StatusEspecial
+  ) {
+    if (!funcionario || ocupado) return;
+
+    if (!confirm("Confirmar alteração do pedido?")) return;
+
+    setOcupado(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("pedidos_especiais")
+        .update({ status })
+        .eq("id", p.id)
+        .select("id");
+
+      if (error) throw error;
+      if (!data?.length) throw new Error("Atualização não autorizada.");
+
+      await carregarEspeciais();
+    } catch (erro) {
+      alert(erroTexto(erro));
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function excluirEspecial(p: Especial) {
+    if (!funcionario || ocupado) return;
+
+    if (!confirm(`Apagar o pedido de ${p.nome_cliente}?`)) return;
+
+    setOcupado(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("pedidos_especiais")
+        .delete()
+        .eq("id", p.id)
+        .select("id");
+
+      if (error) throw error;
+      if (!data?.length) throw new Error("Exclusão não autorizada.");
+
+      await carregarEspeciais();
+    } catch (erro) {
+      alert(erroTexto(erro));
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  const modelosPecas = useMemo(
+    () =>
+      [
+        ...new Set(
+          pecas
+            .filter(
+              (p) =>
+                !marcaPeca ||
+                normalizar(p.marca) === normalizar(marcaPeca)
+            )
+            .map((p) => p.modelo)
+        ),
+      ].sort((a, b) =>
+        a.localeCompare(b, "pt-BR", { numeric: true })
+      ),
+    [pecas, marcaPeca]
+  );
+
+  const resultadosPecas = useMemo(
+    () =>
+      pecas
+        .filter(
+          (p) =>
+            (!tipoPeca ||
+              normalizar(p.tipo_peca) === normalizar(tipoPeca)) &&
+            (!marcaPeca ||
+              normalizar(p.marca) === normalizar(marcaPeca)) &&
+            (!modeloPeca ||
+              normalizar(p.modelo).includes(normalizar(modeloPeca)))
+        )
+        .sort(
+          (a, b) =>
+            Number(a.valor_final) - Number(b.valor_final)
+        ),
+    [pecas, tipoPeca, marcaPeca, modeloPeca]
+  );
+
+  const listaPecas =
+    secaoPecas === "todos"
+      ? pecas
+      : pesquisouPecas
+      ? resultadosPecas
+      : [];
+
+  const totalPaginasPecas = Math.max(
+    1,
+    Math.ceil(listaPecas.length / 8)
+  );
+
+  const pecasPagina = listaPecas.slice(
+    (paginaPecas - 1) * 8,
+    paginaPecas * 8
+  );
+
+  function limparPeca() {
+    setFormPeca(pecaVazia());
+    setEditandoPeca(null);
+  }
+
+  async function salvarPeca() {
+    if (!admin || ocupado) return;
+
+    const dados = {
+      tipo_peca: formPeca.tipo_peca.trim(),
+      marca: formPeca.marca.trim(),
+      modelo: formPeca.modelo.trim(),
+      qualidade: formPeca.qualidade.trim(),
+      valor_custo: numero(formPeca.valor_custo),
+      valor_final: numero(formPeca.valor_final),
+    };
+
+    if (
+      !dados.tipo_peca ||
+      !dados.marca ||
+      !dados.modelo ||
+      !dados.qualidade ||
+      !formPeca.valor_custo.trim() ||
+      !formPeca.valor_final.trim() ||
+      !Number.isFinite(dados.valor_custo) ||
+      !Number.isFinite(dados.valor_final) ||
+      dados.valor_custo < 0 ||
+      dados.valor_final < 0
+    ) {
+      alert("Preencha todos os campos corretamente.");
+      return;
+    }
+
+    setOcupado(true);
+
+    try {
+      const resposta = editandoPeca
+        ? await supabase
+            .from("pecas_precos")
+            .update(dados)
+            .eq("id", editandoPeca)
+            .select("id")
+        : await supabase
+            .from("pecas_precos")
+            .insert(dados)
+            .select("id");
+
+      if (resposta.error) throw resposta.error;
+      if (!resposta.data?.length) {
+        throw new Error("Gravação não autorizada.");
+      }
+
+      limparPeca();
+      await carregarPecas();
+      setSecaoPecas("todos");
+      setPaginaPecas(1);
+
+      alert("Preço salvo!");
+    } catch (erro) {
+      alert(erroTexto(erro));
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  function editarPeca(p: Peca) {
+    if (!admin) return;
+
+    setEditandoPeca(p.id);
+    setFormPeca({
+      tipo_peca: p.tipo_peca,
+      marca: p.marca,
+      modelo: p.modelo,
+      qualidade: p.qualidade,
+      valor_custo: String(p.valor_custo),
+      valor_final: String(p.valor_final),
+    });
+
+    setSecaoPecas("cadastrar");
+    window.scrollTo(0, 0);
+  }
+
+  async function excluirPeca(p: Peca) {
+    if (!admin || !confirm("Excluir este preço?")) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("pecas_precos")
+        .delete()
+        .eq("id", p.id)
+        .select("id");
+
+      if (error) throw error;
+      if (!data?.length) throw new Error("Exclusão não autorizada.");
+
+      await carregarPecas();
+    } catch (erro) {
+      alert(erroTexto(erro));
+    }
+  }
+
+  function limparInfo() {
     setTituloInfo("");
     setConteudoInfo("");
     setEditandoInfo(null);
   }
 
-  async function salvarInformacao() {
-    if (perfil !== "admin" || salvandoInfo) return;
+  async function salvarInfo() {
+    if (!admin || ocupado) return;
 
     if (!tituloInfo.trim() || !conteudoInfo.trim()) {
-      alert("Preencha o título e a descrição.");
+      alert("Preencha título e conteúdo.");
       return;
     }
 
-    setSalvandoInfo(true);
+    setOcupado(true);
+
     try {
       const dados = {
         titulo: tituloInfo.trim(),
         conteudo: conteudoInfo.trim(),
       };
 
-      const resultado = editandoInfo
+      const resposta = editandoInfo
         ? await supabase
             .from("informacoes")
             .update(dados)
@@ -209,1205 +1927,2010 @@ export default function App() {
             .insert(dados)
             .select("id");
 
-      if (resultado.error) {
-        alert("Erro ao salvar: " + resultado.error.message);
-        return;
+      if (resposta.error) throw resposta.error;
+      if (!resposta.data?.length) {
+        throw new Error("Gravação não autorizada.");
       }
 
-      if (!resultado.data?.length) {
-        alert("Não foi possível confirmar a gravação.");
-        return;
-      }
-
-      const editou = Boolean(editandoInfo);
-      limparInformacao();
+      limparInfo();
       await carregarInformacoes();
-      alert(editou ? "Informação atualizada!" : "Informação cadastrada!");
-    } finally {
-      setSalvandoInfo(false);
-    }
-  }
 
-  function editarInformacao(item: Informacao) {
-    if (perfil !== "admin") return;
-    setTituloInfo(item.titulo);
-    setConteudoInfo(item.conteudo);
-    setEditandoInfo(item.id);
-  }
-
-  async function excluirInformacao(id: string) {
-    if (perfil !== "admin") return;
-    if (!confirm("Deseja excluir esta informação?")) return;
-
-    const { data, error } = await supabase
-      .from("informacoes")
-      .delete()
-      .eq("id", id)
-      .select("id");
-
-    if (error) {
-      alert("Erro ao excluir: " + error.message);
-      return;
-    }
-    if (!data?.length) {
-      alert("Exclusão não autorizada.");
-      return;
-    }
-    if (editandoInfo === id) limparInformacao();
-    await carregarInformacoes();
-  }
-
-  useEffect(() => {
-    let ativo = true;
-
-    async function verificarSessao() {
-      try {
-        const { data, error } = await supabase.auth.getUser();
-
-        if (error || !data.user) {
-          if (ativo) {
-            setLogado(false);
-            setPerfil("");
-          }
-          return;
-        }
-
-        const encontrado = await carregarPerfil(data.user.id);
-        if (ativo) {
-          setPerfil(encontrado);
-          setLogado(true);
-          await Promise.all([carregarPecas(), carregarInformacoes()]);
-        }
-      } catch (erro) {
-        console.error(erro);
-        if (ativo) {
-          setLogado(false);
-          setPerfil("");
-        }
-      } finally {
-        if (ativo) setVerificando(false);
-      }
-    }
-
-    void verificarSessao();
-    return () => { ativo = false; };
-  }, []);
-
-  async function entrar() {
-    if (entrando) return;
-    if (!usuario.trim() || !senha) {
-      alert("Informe o usuário e a senha.");
-      return;
-    }
-
-    setEntrando(true);
-    try {
-      const nome = usuario.trim().toLowerCase().replace(/^@/, "");
-      let email = usuario.trim();
-
-      if (nome === "admin") email = EMAIL_ADMIN;
-      else if (nome === "funcionario") email = EMAIL_FUNCIONARIO;
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password: senha,
-      });
-
-      if (error || !data.user) {
-        alert("Usuário ou senha incorretos.");
-        return;
-      }
-
-      let encontrado: Perfil;
-      try {
-        encontrado = await carregarPerfil(data.user.id);
-      } catch (erro) {
-        await supabase.auth.signOut();
-        throw erro;
-      }
-
-      setPerfil(encontrado);
-      setLogado(true);
-      setTela("consultar");
-      setSenha("");
-      setResultados([]);
-      setPagina(1);
-      await Promise.all([carregarPecas(), carregarInformacoes()]);
+      alert("Informação salva!");
     } catch (erro) {
-      alert(erro instanceof Error ? erro.message : "Erro ao entrar.");
+      alert(erroTexto(erro));
     } finally {
-      setEntrando(false);
+      setOcupado(false);
     }
   }
 
-  async function sair() {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      alert("Erro ao sair: " + error.message);
-      return;
-    }
-    setLogado(false);
-    setPerfil("");
-    setUsuario("");
-    setSenha("");
-    setTela("consultar");
-    setPecas([]);
-    setResultados([]);
-    setInformacoes([]);
-    setModelo("");
-    setDigitarModelo(false);
-    limparInformacao();
-  }
+  async function excluirInfo(info: Informacao) {
+    if (!admin || !confirm("Excluir esta informação?")) return;
 
-  function limparFormulario() {
-    setNovaPeca(formularioVazio());
-    setEditandoId(null);
-  }
-
-  async function pesquisarPecas() {
-    const modeloEscolhido = normalizar(modelo);
-    setCarregando(true);
     try {
       const { data, error } = await supabase
-        .from("pecas_precos")
-        .select("*")
-        .order("valor_final", { ascending: true });
+        .from("informacoes")
+        .delete()
+        .eq("id", info.id)
+        .select("id");
 
-      if (error) {
-        alert(error.message);
-        return;
-      }
+      if (error) throw error;
+      if (!data?.length) throw new Error("Exclusão não autorizada.");
 
-      const filtrados = ((data || []) as Peca[]).filter((peca) => {
-        const tipoOk = !tipoPeca.trim() ||
-          normalizar(peca.tipo_peca) === normalizar(tipoPeca);
-        const marcaOk = !marca.trim() ||
-          normalizar(peca.marca) === normalizar(marca);
-        const modeloOk = !modeloEscolhido ||
-          normalizar(peca.modelo) === modeloEscolhido;
-        return tipoOk && marcaOk && modeloOk;
-      });
-
-      setResultados(filtrados);
-      setPagina(1);
-    } finally {
-      setCarregando(false);
+      await carregarInformacoes();
+    } catch (erro) {
+      alert(erroTexto(erro));
     }
   }
 
-  async function salvarPeca() {
-    if (perfil !== "admin") {
-      alert("Somente o administrador pode alterar preços.");
-      return;
-    }
-
-    const dados = {
-      tipo_peca: novaPeca.tipo_peca.trim(),
-      marca: novaPeca.marca.trim(),
-      modelo: novaPeca.modelo.trim(),
-      qualidade: novaPeca.qualidade.trim(),
-      valor_custo: converterNumero(novaPeca.valor_custo),
-      valor_final: converterNumero(novaPeca.valor_final),
-    };
-
-    if (!dados.tipo_peca || !dados.marca ||
-        !dados.modelo || !dados.qualidade) {
-      alert("Preencha tipo, marca, modelo e qualidade.");
-      return;
-    }
-
-    if (!novaPeca.valor_custo.trim() ||
-        !novaPeca.valor_final.trim() ||
-        !Number.isFinite(dados.valor_custo) ||
-        !Number.isFinite(dados.valor_final) ||
-        dados.valor_custo < 0 || dados.valor_final < 0) {
-      alert("Informe valores válidos.");
-      return;
-    }
-
-    if (editandoId) {
-      const { error } = await supabase
-        .from("pecas_precos")
-        .update(dados)
-        .eq("id", editandoId);
-
-      if (error) {
-        alert(error.message);
-        return;
-      }
-      alert("Preço alterado com sucesso!");
-    } else {
-      const { error } = await supabase
-        .from("pecas_precos")
-        .insert([dados]);
-
-      if (error) {
-        alert(error.message);
-        return;
-      }
-      alert("Preço cadastrado com sucesso!");
-    }
-
-    limparFormulario();
-    await carregarPecas();
-    setPagina(1);
-    setTela("todos");
+  function mudarCategoria(c: Categoria) {
+    setCategoria(c);
+    setMarcaFiltro("");
+    setBusca("");
+    setProdutoAbertoId(null);
+    setRascunhos({});
+    setMostrarProduto(false);
+    setTela("estoque");
   }
 
-  function editarPeca(peca: Peca) {
-    if (perfil !== "admin") return;
-    setEditandoId(peca.id);
-    setTela("cadastrar");
-    setNovaPeca({
-      tipo_peca: peca.tipo_peca || "",
-      marca: peca.marca || "",
-      modelo: peca.modelo || "",
-      qualidade: peca.qualidade || "",
-      valor_custo: String(peca.valor_custo ?? ""),
-      valor_final: String(peca.valor_final ?? ""),
-    });
-  }
+  function alterarQuantidadeCategoria(
+    publico: Publico,
+    delta: number
+  ) {
+    const itens = variacoesProduto.filter(
+      (v) => v.publico === publico
+    );
 
-  async function excluirPeca(id: string) {
-    if (perfil !== "admin") return;
-    if (!confirm("Deseja excluir essa peça?")) return;
-
-    const { error } = await supabase
-      .from("pecas_precos")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      alert(error.message);
+    if (!itens.length) {
+      alert(
+        `Cadastre primeiro uma capinha ${publico.toLowerCase()} ` +
+          "para definir o que precisa comprar."
+      );
       return;
     }
-    alert("Peça excluída com sucesso!");
-    await carregarPecas();
-    setResultados((atual) => atual.filter((p) => p.id !== id));
+
+    if (delta > 0 && itens.length > 1) {
+      alert(
+        "Para saber exatamente qual capinha comprar, use o botão + " +
+          "no item desejado da galeria."
+      );
+      return;
+    }
+
+    const v =
+      delta > 0
+        ? itens[0]
+        : itens.find(
+            (item) =>
+              Number(
+                rascunhos[item.id]?.quantidade_comprar ??
+                  item.quantidade_comprar
+              ) > 0
+          );
+
+    if (!v) return;
+
+    const atual = Number(
+      rascunhos[v.id]?.quantidade_comprar ??
+        v.quantidade_comprar
+    );
+
+    alterarRascunho(
+      v,
+      "quantidade_comprar",
+      String(Math.max(0, atual + delta))
+    );
   }
 
-  const listaBase = tela === "consultar" ? resultados : pecas;
-  const totalPaginas = Math.max(1, Math.ceil(listaBase.length / porPagina));
-  const listaAtual = listaBase.slice(
-    (pagina - 1) * porPagina,
-    pagina * porPagina
-  );
+  function pedidosTabela(itens: Variacao[]) {
+    return (
+      <div
+        style={{
+          background: "#111722",
+          border: "1px solid #263040",
+          borderRadius: 14,
+          overflow: "hidden",
+          marginBottom: 17,
+        }}
+      >
+        {itens.map((v, i) => {
+          const p = produtos.find((x) => x.id === v.produto_id);
+
+          return (
+            <label
+              key={v.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "12px 10px",
+                borderBottom:
+                  i < itens.length - 1
+                    ? "1px solid #253040"
+                    : "none",
+                cursor: funcionario ? "pointer" : "default",
+                minWidth: 0,
+              }}
+            >
+              <input
+                type="checkbox"
+                disabled={!funcionario}
+                checked={selecionados.includes(v.id)}
+                onChange={(e) =>
+                  setSelecionados((a) =>
+                    e.target.checked
+                      ? [...a, v.id]
+                      : a.filter((id) => id !== v.id)
+                  )
+                }
+                style={{
+                  width: 20,
+                  height: 20,
+                  accentColor: LARANJA,
+                  flexShrink: 0,
+                }}
+              />
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <strong
+                  style={{
+                    fontSize: 14,
+                    display: "block",
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {p?.modelo || "Modelo não encontrado"}
+                </strong>
+
+                <span style={S.pequeno}>
+                  {v.nome}
+                  {p?.categoria !== "Películas"
+                    ? ` · ${v.publico}`
+                    : ""}
+                </span>
+              </div>
+
+              <div
+                style={{
+                  flexShrink: 0,
+                  textAlign: "right",
+                }}
+              >
+                <strong style={{ color: LARANJA, fontSize: 17 }}>
+                  {v.quantidade_comprar}
+                </strong>
+
+                <div style={{ ...S.pequeno, fontSize: 10 }}>
+                  un.
+                </div>
+              </div>
+            </label>
+          );
+        })}
+      </div>
+    );
+  }
 
   if (verificando) {
     return (
-      <div style={loginPage}>
-        <h1 style={loginTitle}>Marcos Magazine</h1>
-        <p>Verificando acesso...</p>
+      <div style={{ ...S.app, padding: 30, color: LARANJA }}>
+        Carregando Marcos Magazine...
       </div>
     );
   }
 
   if (!logado) {
     return (
-      <div style={loginPage}>
-        <h1 style={loginTitle}>Marcos Magazine</h1>
-        <h2 style={loginSubtitle}>Consulta de Preços de Peças</h2>
-        <div style={loginCard}>
-          <input
-            style={loginInput}
-            placeholder="@admin ou @funcionario"
-            autoComplete="username"
-            value={usuario}
-            onChange={(e) => setUsuario(e.target.value)}
-          />
-          <input
-            style={loginInput}
-            placeholder="Senha"
-            type="password"
-            autoComplete="current-password"
-            value={senha}
-            onChange={(e) => setSenha(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void entrar();
-            }}
-          />
-          <button
-            style={loginButton}
-            onClick={() => void entrar()}
-            disabled={entrando}
-          >
-            {entrando ? "Entrando..." : "Entrar"}
-          </button>
+      <div
+        style={{
+          ...S.app,
+          display: "grid",
+          placeItems: "center",
+          padding: 20,
+        }}
+      >
+        <div style={{ width: "100%", maxWidth: 410 }}>
+          <div style={{ marginBottom: 30 }}>
+            <Logo />
+          </div>
+
+          <section style={S.card}>
+            <h2>Entrar no sistema</h2>
+
+            <Campo rotulo="Usuário">
+              <input
+                style={S.input}
+                value={usuario}
+                placeholder="@admin ou @funcionario"
+                autoComplete="username"
+                onChange={(e) => setUsuario(e.target.value)}
+              />
+            </Campo>
+
+            <Campo rotulo="Senha">
+              <input
+                style={S.input}
+                type="password"
+                value={senha}
+                autoComplete="current-password"
+                onChange={(e) => setSenha(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void entrar();
+                }}
+              />
+            </Campo>
+
+            <Botao
+              disabled={entrando}
+              onClick={() => void entrar()}
+              style={{ width: "100%" }}
+            >
+              {entrando ? "Entrando..." : "Entrar"}
+            </Botao>
+          </section>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={page}>
-      <aside style={sidebar}>
-        <h2 style={sidebarTitle}>Marcos Magazine</h2>
-        <div style={orangeLine} />
+    <div style={S.app}>
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={(e) => void receberFoto(e)}
+        style={{ display: "none" }}
+      />
 
-        <div style={profileBox}>
-          <div style={profileIcon}>👤</div>
-          <p style={profileText}>
-            Perfil:
-            <br />
-            <strong>
-              {perfil === "admin" ? "Administrador" : "Funcionário"}
-            </strong>
-          </p>
-        </div>
+      <input
+        ref={galeriaRef}
+        type="file"
+        accept="image/*"
+        onChange={(e) => void receberFoto(e)}
+        style={{ display: "none" }}
+      />
 
+      <header
+  style={{
+    ...S.topo,
+    display: tela === "inicio" ? "none" : "flex",
+  }}
+>
         <button
-          style={tela === "consultar" ? activeMenuButton : menuButton}
+          type="button"
           onClick={() => {
-            setTela("consultar");
-            setPagina(1);
+            if (produtoAbertoId) {
+              setProdutoAbertoId(null);
+              setRascunhos({});
+              limparVariacao();
+            } else {
+              setMenuAberto(!menuAberto);
+            }
+          }}
+          style={{
+            border: 0,
+            background: "transparent",
+            color: "#fff",
+            fontSize: produtoAbertoId ? 15 : 25,
+            minWidth: 45,
+            textAlign: "left",
+            cursor: "pointer",
           }}
         >
-          <span style={menuIcon}>⌕</span>
-          <span>Consultar<br />Peças</span>
+          {produtoAbertoId ? "‹ Voltar" : "☰"}
         </button>
+
+        <Logo />
 
         <button
-          style={tela === "informacoes" ? activeMenuButton : menuButton}
-          onClick={() => {
-            setTela("informacoes");
-            void carregarInformacoes();
+          type="button"
+          onClick={() => setMenuAberto(!menuAberto)}
+          style={{
+            border: 0,
+            background: "transparent",
+            color: "#ddd",
+            fontSize: 11,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
           }}
         >
-          <span style={menuIcon}>ⓘ</span>
-          <span>Informações</span>
+          ◉ {admin ? "Admin" : "Funcionário"}⌄
         </button>
+      </header>
 
-        {perfil === "admin" && (
+      {menuAberto && (
+        <>
+          <div
+            onClick={() => setMenuAberto(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 30,
+              background: "#0009",
+            }}
+          />
+
+          <div
+            style={{
+              position: "fixed",
+              top: 70,
+              left: 10,
+              zIndex: 31,
+              width: "min(290px,calc(100vw - 20px))",
+              background: "#151b26",
+              border: "1px solid #303a4a",
+              borderRadius: 15,
+              padding: 14,
+              boxSizing: "border-box",
+              boxShadow: "0 15px 40px #000a",
+            }}
+          >
+            <h3 style={{ marginTop: 0, color: LARANJA }}>
+              Menu
+            </h3>
+
+            <Botao
+              variante="secundario"
+              onClick={() => navegar("pedidos")}
+              style={{ width: "100%", marginBottom: 9 }}
+            >
+              📋 Pedidos
+            </Botao>
+
+            <Botao
+              variante="secundario"
+              onClick={() => navegar("pedidos_especiais")}
+              style={{ width: "100%", marginBottom: 9 }}
+            >
+              📦 Pedidos especiais
+            </Botao>
+
+            <Botao
+              variante="perigo"
+              onClick={() => void sair()}
+              style={{ width: "100%" }}
+            >
+              🚪 Sair
+            </Botao>
+          </div>
+        </>
+      )}
+
+      <main style={S.conteudo}>
+        {tela === "inicio" && (
+  <TelaInicial
+    onAbrirMenu={() => setMenuAberto(true)}
+    modelosCadastrados={
+      produtos.filter((p) => p.ativo).length
+    }
+    itensReposicao={
+      variacoes.filter(
+        (v) => Number(v.quantidade_comprar) > 0
+      ).length
+    }
+    onNavegar={(funcao) => {
+      if (funcao === "capinhas") {
+        setCategoria("Capas");
+        navegar("estoque");
+      } else if (funcao === "peliculas") {
+        setCategoria("Películas");
+        navegar("estoque");
+      } else if (funcao === "estoque") {
+        setCategoria("Outros");
+        navegar("estoque");
+      } else if (funcao === "pecas") {
+        navegar("pecas");
+      } else if (funcao === "informacoes") {
+        navegar("informacoes");
+      }
+    }}
+  />
+)}
+
+        {tela === "estoque" && !produtoAberto && (
           <>
-            <button
-              style={tela === "cadastrar" ? activeMenuButton : menuButton}
-              onClick={() => {
-                limparFormulario();
-                setTela("cadastrar");
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3,minmax(0,1fr))",
+                gap: 9,
+                margin: "14px 0",
               }}
             >
-              <span style={menuIcon}>+</span>
-              <span>Cadastrar<br />Preços</span>
-            </button>
+              {CATEGORIAS.map((c) => {
+                const ativo = categoria === c && tela === "estoque";
 
-            <button
-              style={tela === "todos" ? activeMenuButton : menuButton}
-              onClick={() => {
-                setTela("todos");
-                setPagina(1);
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => mudarCategoria(c)}
+                    style={{
+                      background: ativo
+                        ? "linear-gradient(140deg,#ff6600,#b83d00)"
+                        : "#151c28",
+                      border: ativo
+                        ? "1px solid #ff8a42"
+                        : "1px solid #283242",
+                      borderRadius: 14,
+                      color: "#fff",
+                      minHeight: 91,
+                      padding: "13px 4px",
+                      cursor: "pointer",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      boxShadow: ativo ? "0 4px 15px #ff660030" : "none",
+                    }}
+                  >
+                    <span style={{ fontSize: 27 }}>
+  {c === "Capas"
+    ? "📱"
+    : c === "Películas"
+    ? "🛡️"
+    : "📦"}
+</span>
+
+                    <span style={{ fontSize: 12, fontWeight: 700 }}>
+                      {c}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                marginBottom: 14,
               }}
             >
-              <span style={menuIcon}>▦</span>
-              <span>Todos os<br />Preços</span>
-            </button>
-          </>
-        )}
-
-        <button style={logoutButton} onClick={() => void sair()}>
-          <span style={exitIcon}>↪</span>
-          <span>Sair</span>
-        </button>
-      </aside>
-
-      <main style={content}>
-        <h1 style={mainTitle}>
-          {tela === "informacoes"
-            ? "Informações Técnicas"
-            : "Consulta de Preços de Peças"}
-        </h1>
-
-        {tela === "informacoes" && (
-          <section>
-            <h2 style={subTitle}>
-              Informações sobre peças e componentes
-            </h2>
-
-            {perfil === "admin" && (
-              <div style={searchCard}>
-                <h2 style={sectionTitle}>
-                  {editandoInfo
-                    ? "Editar informação"
-                    : "Cadastrar informação"}
-                </h2>
+              <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
+                <span
+                  style={{
+                    position: "absolute",
+                    left: 12,
+                    top: 11,
+                    fontSize: 20,
+                    color: "#9da7b8",
+                  }}
+                >
+                  ⌕
+                </span>
 
                 <input
-                  style={input}
-                  placeholder="Título. Ex: Bateria genuína x não genuína"
-                  value={tituloInfo}
-                  onChange={(e) => setTituloInfo(e.target.value)}
-                />
-
-                <textarea
                   style={{
-                    ...input,
-                    minHeight: 140,
-                    resize: "vertical" as const,
-                    fontFamily: "Arial, sans-serif",
+                    ...S.input,
+                    paddingLeft: 39,
                   }}
-                  placeholder="Escreva aqui a explicação completa..."
-                  value={conteudoInfo}
-                  onChange={(e) => setConteudoInfo(e.target.value)}
+                  value={busca}
+                  placeholder="Buscar modelo de celular..."
+                  onChange={(e) => {
+                    setBusca(e.target.value);
+                    setTela("estoque");
+                  }}
                 />
+              </div>
 
-                <button
-                  style={button}
-                  disabled={salvandoInfo}
-                  onClick={() => void salvarInformacao()}
+              <Botao
+                variante="secundario"
+                onClick={() => setFiltroAberto(!filtroAberto)}
+                style={{ width: 47, padding: 0, fontSize: 20 }}
+              >
+                ⚲
+              </Botao>
+            </div>
+
+            {filtroAberto && (
+              <section style={S.card}>
+                <Campo rotulo="Filtrar por marca">
+                  <select
+                    style={S.input}
+                    value={marcaFiltro}
+                    onChange={(e) => {
+                      setMarcaFiltro(e.target.value);
+                      setTela("estoque");
+                    }}
+                  >
+                    <option value="">Todas as marcas</option>
+
+                    {MARCAS.map((m) => (
+                      <option key={m} value={m}>
+                        {m === "Apple" ? "iPhone" : m}
+                      </option>
+                    ))}
+                  </select>
+                </Campo>
+
+                <Botao
+                  variante="secundario"
+                  onClick={() => {
+                    setMarcaFiltro("");
+                    setBusca("");
+                    setFiltroAberto(false);
+                  }}
                 >
-                  {salvandoInfo
-                    ? "Salvando..."
-                    : editandoInfo
-                    ? "Salvar alteração"
-                    : "Cadastrar informação"}
+                  Limpar filtros
+                </Botao>
+              </section>
+            )}
+
+            <div
+              style={{
+                display: "flex",
+                gap: 7,
+                overflowX: "auto",
+                paddingBottom: 9,
+                marginBottom: 13,
+              }}
+            >
+              {["", ...MARCAS].map((m) => (
+                <button
+                  key={m || "todos"}
+                  type="button"
+                  onClick={() => {
+                    setMarcaFiltro(m);
+                    setTela("estoque");
+                  }}
+                  style={{
+                    ...S.secundario,
+                    background:
+                      marcaFiltro === m ? LARANJA : "#151c28",
+                    borderColor:
+                      marcaFiltro === m ? LARANJA : "#293243",
+                    minHeight: 37,
+                    padding: "8px 13px",
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                    fontSize: 12,
+                  }}
+                >
+                  {!m ? "Todos" : m === "Apple" ? "iPhone" : m}
                 </button>
-
-                {editandoInfo && (
-                  <button
-                    style={{ ...secondaryButton, marginTop: 10 }}
-                    onClick={limparInformacao}
-                  >
-                    Cancelar edição
-                  </button>
-                )}
-              </div>
-            )}
-
-            {erroInfo && (
-              <p style={{ color: "#ff7777" }}>{erroInfo}</p>
-            )}
-
-            {informacoes.length === 0 && !erroInfo && (
-              <div style={emptyCard}>
-                Nenhuma informação cadastrada.
-              </div>
-            )}
-
-            <div style={listBox}>
-              {informacoes.map((item) => (
-                <article key={item.id} style={searchCard}>
-                  <h3
-                    style={{
-                      color: "#ff6600",
-                      fontSize: 16,
-                      marginTop: 0,
-                    }}
-                  >
-                    {item.titulo}
-                  </h3>
-
-                  <p
-                    style={{
-                      whiteSpace: "pre-wrap",
-                      overflowWrap: "anywhere",
-                      lineHeight: 1.5,
-                      fontSize: 14,
-                    }}
-                  >
-                    {item.conteudo}
-                  </p>
-
-                  {perfil === "admin" && (
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button
-                        style={secondaryButton}
-                        onClick={() => editarInformacao(item)}
-                      >
-                        Editar
-                      </button>
-                      <button
-                        style={{
-                          ...secondaryButton,
-                          color: "#ff7777",
-                        }}
-                        onClick={() => void excluirInformacao(item.id)}
-                      >
-                        Excluir
-                      </button>
-                    </div>
-                  )}
-                </article>
               ))}
             </div>
-          </section>
-        )}
 
-        {tela === "consultar" && (
-          <section style={searchCard}>
-            <select
-              style={input}
-              value={tipoPeca}
-              onChange={(e) => setTipoPeca(e.target.value)}
-            >
-              <option value="">Todos os tipos de peças</option>
-              {TIPOS.map((tipo) => (
-                <option key={tipo} value={tipo}>{tipo}</option>
-              ))}
-            </select>
-
-            <select
-              style={input}
-              value={marca}
-              onChange={(e) => {
-                setMarca(e.target.value);
-                setModelo("");
-                setDigitarModelo(false);
-              }}
-            >
-              <option value="">Todas as marcas</option>
-              {MARCAS.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-
-            <select
-              style={input}
-              value={digitarModelo ? "__digitar__" : modelo}
-              onChange={(e) => {
-                const valor = e.target.value;
-                if (valor === "__digitar__") {
-                  setDigitarModelo(true);
-                  setModelo("");
-                } else {
-                  setDigitarModelo(false);
-                  setModelo(valor);
-                }
-              }}
-            >
-              <option value="">Todos os modelos</option>
-              {modelosDisponiveis.map((nome) => (
-                <option key={nome} value={nome}>{nome}</option>
-              ))}
-              <option value="__digitar__">✏️ Digitar modelo</option>
-            </select>
-
-            {digitarModelo && (
-              <div>
-                <input
-                  style={input}
-                  placeholder="Digite o modelo exato"
-                  value={modelo}
-                  onChange={(e) => setModelo(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void pesquisarPecas();
-                  }}
-                />
-                <button
-                  type="button"
-                  style={secondaryButton}
-                  onClick={() => {
-                    setDigitarModelo(false);
-                    setModelo("");
-                  }}
-                >
-                  Voltar para lista de modelos
-                </button>
-              </div>
+            {funcionario && (
+              <Botao
+                onClick={() => {
+                  if (mostrarProduto) {
+                    limparProduto();
+                  } else {
+                    setFormProduto(produtoVazio(categoria));
+                    setEditandoProduto(null);
+                    setMostrarProduto(true);
+                    setTela("estoque");
+                  }
+                }}
+                style={{ width: "100%", marginBottom: 14 }}
+              >
+                {mostrarProduto
+                  ? "Fechar cadastro"
+                  : "+ Cadastrar modelo"}
+              </Botao>
             )}
 
-            <button
-              style={button}
-              disabled={carregando}
-              onClick={() => void pesquisarPecas()}
-            >
-              {carregando ? "Buscando..." : "Buscar"}
-            </button>
-          </section>
-        )}
+            {mostrarProduto && funcionario && (
+              <FormularioProduto
+                form={formProduto}
+                setForm={setFormProduto}
+                editando={!!editandoProduto}
+                ocupado={ocupado}
+                enviando={enviandoFoto}
+                salvar={() => void salvarProduto()}
+                cancelar={limparProduto}
+                camera={() => escolherFoto("produto", "camera")}
+                galeria={() => escolherFoto("produto", "galeria")}
+              />
+            )}
 
-        {tela === "cadastrar" && perfil === "admin" && (
-          <section style={searchCard}>
-            <h2 style={sectionTitle}>
-              {editandoId ? "Alterar Preço" : "Cadastrar Novo Preço"}
-            </h2>
+            <div style={{ ...S.linha, justifyContent: "space-between" }}>
+              <h3 style={{ margin: "8px 0 13px" }}>
+                {categoria}
+              </h3>
 
-            <select
-              style={input}
-              value={novaPeca.tipo_peca}
-              onChange={(e) =>
-                setNovaPeca({
-                  ...novaPeca,
-                  tipo_peca: e.target.value,
-                })
-              }
-            >
-              <option value="">Selecione o tipo de peça</option>
-              {[
-                ...new Set([
-                  ...TIPOS,
-                  ...(novaPeca.tipo_peca ? [novaPeca.tipo_peca] : []),
-                ]),
-              ].map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
+              <span style={S.pequeno}>
+                {produtosFiltrados.length} modelos
+              </span>
+            </div>
 
-            <select
-              style={input}
-              value={novaPeca.marca}
-              onChange={(e) =>
-                setNovaPeca({
-                  ...novaPeca,
-                  marca: e.target.value,
-                })
-              }
-            >
-              <option value="">Selecione a marca</option>
-              {[
-                ...new Set([
-                  ...MARCAS,
-                  ...(novaPeca.marca ? [novaPeca.marca] : []),
-                ]),
-              ].map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
+            {produtosFiltrados.length === 0 && (
+              <section style={S.card}>
+                Nenhum modelo encontrado.
+              </section>
+            )}
 
-            <input
-              style={input}
-              placeholder="Modelo. Ex: iPhone 11 Pro Max"
-              value={novaPeca.modelo}
-              onChange={(e) =>
-                setNovaPeca({
-                  ...novaPeca,
-                  modelo: e.target.value,
-                })
-              }
-            />
+            {produtosFiltrados.map((p) => {
+              const itens = variacoes.filter(
+                (v) => v.produto_id === p.id
+              );
 
-            <select
-              style={input}
-              value={novaPeca.qualidade}
-              onChange={(e) =>
-                setNovaPeca({
-                  ...novaPeca,
-                  qualidade: e.target.value,
-                })
-              }
-            >
-              <option value="">Selecione a qualidade</option>
-              {[
-                ...new Set([
-                  ...QUALIDADES,
-                  ...(novaPeca.qualidade ? [novaPeca.qualidade] : []),
-                ]),
-              ].map((q) => (
-                <option key={q} value={q}>{q}</option>
-              ))}
-            </select>
+              const feminino = totalPublico(itens, "Feminino");
+              const masculino = totalPublico(itens, "Masculino");
+              const unissex = totalPublico(itens, "Unissex");
 
-            <input
-              style={input}
-              placeholder="Valor de custo"
-              inputMode="decimal"
-              value={novaPeca.valor_custo}
-              onChange={(e) =>
-                setNovaPeca({
-                  ...novaPeca,
-                  valor_custo: e.target.value,
-                })
-              }
-            />
+              const total = itens.reduce(
+                (s, v) => s + Number(v.quantidade || 0),
+                0
+              );
 
-            <input
-              style={input}
-              placeholder="Valor final"
-              inputMode="decimal"
-              value={novaPeca.valor_final}
-              onChange={(e) =>
-                setNovaPeca({
-                  ...novaPeca,
-                  valor_final: e.target.value,
-                })
-              }
-            />
-
-            <button
-              style={button}
-              onClick={() => void salvarPeca()}
-            >
-              {editandoId ? "Salvar Alteração" : "Salvar Preço"}
-            </button>
-          </section>
-        )}
-
-        {(tela === "todos" || tela === "consultar") && (
-          <>
-            <h2 style={subTitle}>
-              {tela === "todos"
-                ? "Todos os Preços Cadastrados"
-                : "Resultados"}
-            </h2>
-
-            {listaAtual.length === 0 ? (
-              <div style={emptyCard}>Nenhuma peça encontrada.</div>
-            ) : (
-              <div style={listBox}>
-                {listaAtual.map((peca) => (
-                  <div key={peca.id} style={pieceCard}>
+              return (
+                <section
+                  key={p.id}
+                  style={{
+                    ...S.card,
+                    padding: 11,
+                  }}
+                >
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => abrirProduto(p)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") abrirProduto(p);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      cursor: "pointer",
+                      minWidth: 0,
+                    }}
+                  >
                     <div
                       style={{
-                        ...brandLogo,
-                        background: corLogo(peca.marca),
-                        color: normalizar(peca.marca).includes("apple")
-                          ? "#111"
-                          : "#fff",
+                        width: 72,
+                        height: 82,
+                        flexShrink: 0,
+                        borderRadius: 11,
+                        overflow: "hidden",
+                        background: "#202938",
+                        display: "grid",
+                        placeItems: "center",
                       }}
                     >
-                      {logoMarca(peca.marca)}
-                    </div>
-
-                    <div style={infoBox}>
-                      <h3 style={pieceTitle}>
-                        {peca.tipo_peca} - {peca.marca} {peca.modelo}
-                      </h3>
-                      <p style={pieceText}>
-                        Qualidade:{" "}
-                        <strong style={orangeText}>
-                          {peca.qualidade}
-                        </strong>
-                      </p>
-                      {perfil === "admin" && (
-                        <p style={pieceText}>
-                          Custo: {dinheiro(peca.valor_custo)}
-                        </p>
+                      {p.categoria !== "Películas" && p.imagem_url ? (
+                        <img
+                          src={p.imagem_url}
+                          alt={p.modelo}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "contain",
+                          }}
+                        />
+                      ) : (
+                        <span style={{ fontSize: 31 }}>
+                          {p.categoria === "Películas" ? "▯" : "📱"}
+                        </span>
                       )}
                     </div>
 
-                    <div style={divider} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <strong
+                        style={{
+                          display: "block",
+                          fontSize: 15,
+                          marginBottom: 7,
+                          overflowWrap: "anywhere",
+                        }}
+                      >
+                        {p.modelo}
+                      </strong>
 
-                    <div style={priceArea}>
-                      <p style={priceLabel}>Valor final:</p>
-                      <h2 style={price}>
-                        {dinheiro(peca.valor_final)}
-                      </h2>
+                      {p.categoria === "Películas" ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: 6,
+                          }}
+                        >
+                          {itens.map((v) => (
+                            <span
+                              key={v.id}
+                              style={{
+                                fontSize: 11,
+                                color: "#bec8d8",
+                              }}
+                            >
+                              {v.nome}:{" "}
+                              <b style={{ color: LARANJA }}>
+                                {v.quantidade}
+                              </b>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: 9,
+                          }}
+                        >
+                          <span style={{ fontSize: 11 }}>
+                            <b style={{ color: ROSA, fontSize: 17 }}>
+                              ♀
+                            </b>{" "}
+                            {feminino}
+                          </span>
 
-                      {perfil === "admin" && (
-                        <div style={actionBox}>
-                          <button
-                            style={editButton}
-                            onClick={() => editarPeca(peca)}
-                            title="Editar"
-                          >
-                            ✎
-                          </button>
-                          <button
-                            style={deleteButton}
-                            onClick={() => void excluirPeca(peca.id)}
-                            title="Excluir"
-                          >
-                            🗑
-                          </button>
+                          <span style={{ fontSize: 11 }}>
+                            <b style={{ color: AZUL, fontSize: 17 }}>
+                              ♂
+                            </b>{" "}
+                            {masculino}
+                          </span>
+
+                          {unissex > 0 && (
+                            <span style={{ fontSize: 11 }}>
+                              Unissex {unissex}
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
+
+                    <div
+                      style={{
+                        background: "#1b2432",
+                        borderRadius: 10,
+                        padding: "9px 8px",
+                        minWidth: 54,
+                        textAlign: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div style={{ ...S.pequeno, fontSize: 10 }}>
+                        Total
+                      </div>
+
+                      <strong style={{ fontSize: 23 }}>
+                        {total}
+                      </strong>
+
+                      <div style={{ ...S.pequeno, fontSize: 10 }}>
+                        un.
+                      </div>
+                    </div>
                   </div>
+
+                  {funcionario && (
+                    <div
+                      style={{
+                        ...S.linha,
+                        marginTop: 11,
+                        borderTop: "1px solid #283142",
+                        paddingTop: 10,
+                      }}
+                    >
+                      <Botao
+                        variante="secundario"
+                        onClick={() => editarProduto(p)}
+                        style={{ minHeight: 34, fontSize: 12 }}
+                      >
+                        Editar modelo
+                      </Botao>
+
+                      <Botao
+                        variante="perigo"
+                        onClick={() => void excluirProduto(p)}
+                        style={{ minHeight: 34, fontSize: 12 }}
+                      >
+                        Excluir
+                      </Botao>
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </>
+        )}
+
+        {tela === "estoque" && produtoAberto && abrirGaleria && (
+  <GaleriaCapinhas
+    produtoId={produtoAberto.id}
+    modelo={produtoAberto.modelo}
+    onFazerPedido={() => setAbrirGaleria(false)}
+    podeEditar={perfil === "admin" || perfil === "funcionario"}
+    onVoltar={() => {
+      setAbrirGaleria(false);
+      setProdutoAbertoId(null);
+    }}
+  />
+)}
+
+{tela === "estoque" && produtoAberto && !abrirGaleria && (
+          <>
+            <section
+              style={{
+                ...S.card,
+                display: "flex",
+                gap: 12,
+                alignItems: "center",
+              }}
+            >
+              <div
+                style={{
+                  width: 75,
+                  height: 83,
+                  background: "#202938",
+                  borderRadius: 11,
+                  display: "grid",
+                  placeItems: "center",
+                  flexShrink: 0,
+                  overflow: "hidden",
+                }}
+              >
+                {produtoAberto.categoria !== "Películas" &&
+                produtoAberto.imagem_url ? (
+                  <img
+                    src={produtoAberto.imagem_url}
+                    alt={produtoAberto.modelo}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "contain",
+                    }}
+                  />
+                ) : (
+                  <span style={{ fontSize: 31 }}>📱</span>
+                )}
+              </div>
+
+              <div style={{ minWidth: 0 }}>
+                <h2
+                  style={{
+                    fontSize: 19,
+                    margin: "0 0 6px",
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {produtoAberto.modelo}
+                </h2>
+
+                <span style={S.pequeno}>
+                  {produtoAberto.categoria}
+                </span>
+              </div>
+            </section>
+
+            {produtoAberto.categoria !== "Películas" && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3,minmax(0,1fr))",
+                  gap: 6,
+                  marginBottom: 14,
+                }}
+              >
+                {PUBLICOS.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPublicoFiltro(p)}
+                    style={{
+                      ...S.secundario,
+                      background:
+                        publicoFiltro === p ? LARANJA : "#171e2a",
+                      borderColor:
+                        publicoFiltro === p ? LARANJA : "#283344",
+                      padding: "10px 4px",
+                      fontSize: 11,
+                      minWidth: 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        color:
+                          publicoFiltro === p
+                            ? "#fff"
+                            : p === "Feminino"
+                            ? ROSA
+                            : p === "Masculino"
+                            ? AZUL
+                            : "#ddd",
+                        fontSize: 17,
+                      }}
+                    >
+                      {p === "Feminino"
+                        ? "♀"
+                        : p === "Masculino"
+                        ? "♂"
+                        : "◉"}
+                    </span>{" "}
+                    {p} (
+                    {variacoesProduto
+                      .filter((v) => v.publico === p)
+                      .reduce(
+                        (s, v) => s + Number(v.quantidade || 0),
+                        0
+                      )}
+                    )
+                  </button>
                 ))}
               </div>
             )}
 
-            <div style={pagination}>
-              <button
-                style={pageButton}
-                disabled={pagina === 1}
-                onClick={() => setPagina((p) => p - 1)}
-              >
-                Anterior
-              </button>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns:
+                  produtoAberto.categoria === "Películas"
+                    ? "repeat(2,minmax(0,1fr))"
+                    : "repeat(auto-fill,minmax(105px,1fr))",
+                gap: 9,
+                marginBottom: 17,
+              }}
+            >
+              {variacoesVisiveis.map((v) => {
+                const r = rascunhos[v.id];
 
-              <p style={pageText}>
-                Página <strong style={orangeText}>{pagina}</strong>{" "}
-                de {totalPaginas}
-              </p>
+                return (
+                  <div
+                    key={v.id}
+                    style={{
+                      background: "#131a25",
+                      border: "1px solid #2b3444",
+                      borderRadius: 12,
+                      padding: 7,
+                      minWidth: 0,
+                    }}
+                  >
+                    {produtoAberto.categoria !== "Películas" && (
+                      <div
+                        style={{
+                          height: 120,
+                          background: "#0b1019",
+                          borderRadius: 9,
+                          overflow: "hidden",
+                          display: "grid",
+                          placeItems: "center",
+                          marginBottom: 7,
+                        }}
+                      >
+                        {v.imagem_url ? (
+                          <img
+                            src={v.imagem_url}
+                            alt={v.nome}
+                            style={{
+                              width: "100%",
+                              height: "100%",
+                              objectFit: "contain",
+                            }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: 32 }}>📱</span>
+                        )}
+                      </div>
+                    )}
 
-              <button
-                style={nextButton}
-                disabled={pagina === totalPaginas}
-                onClick={() => setPagina((p) => p + 1)}
-              >
-                Próxima
-              </button>
+                    <strong
+                      style={{
+                        display: "block",
+                        fontSize: 12,
+                        textAlign: "center",
+                        minHeight: 29,
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {v.nome}
+                    </strong>
 
-              <p style={totalText}>
-                Total de {listaBase.length} registros
-              </p>
+                    <div
+                      style={{
+                        color: LARANJA,
+                        fontSize: 12,
+                        fontWeight: 800,
+                        textAlign: "center",
+                        margin: "6px 0",
+                      }}
+                    >
+                      Estoque:{" "}
+                      {r?.quantidade ?? String(v.quantidade)}
+                    </div>
+
+                    {funcionario && (
+                      <>
+                        <Campo rotulo="Em estoque">
+                          <input
+                            style={{
+                              ...S.input,
+                              minHeight: 35,
+                              padding: "6px 4px",
+                              textAlign: "center",
+                              fontSize: 14,
+                            }}
+                            type="number"
+                            min="0"
+                            value={
+                              r?.quantidade ?? String(v.quantidade)
+                            }
+                            onChange={(e) =>
+                              alterarRascunho(
+                                v,
+                                "quantidade",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Campo>
+
+                        <div
+                          style={{
+                            fontSize: 10,
+                            color: "#9da7b8",
+                            textAlign: "center",
+                            marginBottom: 5,
+                          }}
+                        >
+                          Precisa comprar
+                        </div>
+
+                        <ControleNumero
+                          disabled={ocupado}
+                          valor={
+                            r?.quantidade_comprar ??
+                            String(v.quantidade_comprar)
+                          }
+                          alterar={(valor) =>
+                            alterarRascunho(
+                              v,
+                              "quantidade_comprar",
+                              valor
+                            )
+                          }
+                        />
+
+                        <Botao
+                          variante="secundario"
+                          onClick={() => editarVariacao(v)}
+                          style={{
+                            width: "100%",
+                            marginTop: 9,
+                            minHeight: 32,
+                            fontSize: 11,
+                          }}
+                        >
+                          Editar
+                        </Botao>
+
+                        <Botao
+                          variante="perigo"
+                          onClick={() => void excluirVariacao(v)}
+                          style={{
+                            width: "100%",
+                            marginTop: 5,
+                            minHeight: 32,
+                            fontSize: 11,
+                          }}
+                        >
+                          Excluir
+                        </Botao>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+
+            {variacoesVisiveis.length === 0 && (
+              <section style={S.card}>
+                <p style={S.pequeno}>
+                  Nenhum item cadastrado nesta categoria.
+                </p>
+              </section>
+            )}
+
+            {produtoAberto.categoria !== "Películas" && (
+              <>
+                {(["Feminino", "Masculino", "Unissex"] as Publico[]).map(
+                  (p) => {
+                    const itens = variacoesProduto.filter(
+                      (v) => v.publico === p
+                    );
+
+                    if (p === "Unissex" && !itens.length) return null;
+
+                    const total = totalPublico(variacoesProduto, p);
+
+                    const comprar = itens.reduce(
+                      (s, v) =>
+                        s +
+                        Number(
+                          rascunhos[v.id]?.quantidade_comprar ??
+                            v.quantidade_comprar
+                        ),
+                      0
+                    );
+
+                    return (
+                      <section
+                        key={p}
+                        style={{
+                          ...S.card,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 9,
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: 31,
+                                color:
+                                  p === "Feminino"
+                                    ? ROSA
+                                    : p === "Masculino"
+                                    ? AZUL
+                                    : "#ccc",
+                              }}
+                            >
+                              {p === "Feminino"
+                                ? "♀"
+                                : p === "Masculino"
+                                ? "♂"
+                                : "◉"}
+                            </span>
+
+                            <div>
+                              <div style={S.pequeno}>
+                                Total de capas {p.toLowerCase()}
+                              </div>
+
+                              <strong style={{ fontSize: 18 }}>
+                                {total} capas
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: "center" }}>
+                          <div
+                            style={{
+                              ...S.pequeno,
+                              fontSize: 10,
+                              marginBottom: 5,
+                            }}
+                          >
+                            Precisa comprar
+                          </div>
+
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              justifyContent: "center",
+                            }}
+                          >
+                            {funcionario && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  alterarQuantidadeCategoria(p, -1)
+                                }
+                                style={{
+                                  ...S.principal,
+                                  width: 31,
+                                  minHeight: 34,
+                                  padding: 0,
+                                }}
+                              >
+                                −
+                              </button>
+                            )}
+
+                            <strong
+                              style={{
+                                minWidth: 30,
+                                fontSize: 19,
+                              }}
+                            >
+                              {comprar}
+                            </strong>
+
+                            {funcionario && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  alterarQuantidadeCategoria(p, 1)
+                                }
+                                style={{
+                                  ...S.principal,
+                                  width: 31,
+                                  minHeight: 34,
+                                  padding: 0,
+                                }}
+                              >
+                                +
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </section>
+                    );
+                  }
+                )}
+              </>
+            )}
+
+            {funcionario && (
+              <>
+                {Object.keys(rascunhos).length > 0 && (
+                  <Botao
+                    disabled={ocupado}
+                    onClick={() => void salvarQuantidades()}
+                    style={{
+                      width: "100%",
+                      marginBottom: 12,
+                      minHeight: 51,
+                    }}
+                  >
+                    🛒 Salvar atualização
+                  </Botao>
+                )}
+
+                <Botao
+                  variante="secundario"
+                  onClick={() => {
+                    if (mostrarVariacao) {
+                      limparVariacao();
+                    } else {
+                      setFormVariacao(variacaoVazia());
+                      setEditandoVariacao(null);
+                      setMostrarVariacao(true);
+                    }
+                  }}
+                  style={{
+                    width: "100%",
+                    marginBottom: 12,
+                  }}
+                >
+                  {mostrarVariacao
+                    ? "Fechar cadastro"
+                    : "+ Adicionar capinha / item"}
+                </Botao>
+
+                {mostrarVariacao && (
+                  <FormularioVariacao
+                    form={formVariacao}
+                    setForm={setFormVariacao}
+                    categoria={produtoAberto.categoria}
+                    editando={!!editandoVariacao}
+                    ocupado={ocupado}
+                    enviando={enviandoFoto}
+                    salvar={() => void salvarVariacao()}
+                    cancelar={limparVariacao}
+                    camera={() =>
+                      escolherFoto("variacao", "camera")
+                    }
+                    galeria={() =>
+                      escolherFoto("variacao", "galeria")
+                    }
+                  />
+                )}
+              </>
+            )}
+          </>
+        )}
+
+        {tela === "pedidos" && (
+          <>
+            <h1 style={S.titulo}>Pedidos</h1>
+
+            <section style={S.card}>
+              <div
+                style={{
+                  ...S.linha,
+                  justifyContent: "space-between",
+                }}
+              >
+                <strong>Reposição de estoque</strong>
+
+                <strong style={{ color: LARANJA }}>
+                  {totalComprar} unidades
+                </strong>
+              </div>
+
+              <p style={S.pequeno}>
+                Selecione vários itens para registrar a compra ou a
+                chegada.
+              </p>
+            </section>
+
+            <h3 style={{ color: "#f0bf74" }}>
+              ● Pendentes ({pendentes.length})
+            </h3>
+
+            {pendentes.length ? (
+              pedidosTabela(pendentes)
+            ) : (
+              <p style={S.pequeno}>
+                Nenhum pedido aguardando compra.
+              </p>
+            )}
+
+            <h3 style={{ color: "#7ddd95" }}>
+              ✓ Pedidos feitos ({comprados.length})
+            </h3>
+
+            {comprados.length ? (
+              pedidosTabela(comprados)
+            ) : (
+              <p style={S.pequeno}>
+                Nenhum pedido aguardando chegada.
+              </p>
+            )}
+
+            {funcionario && pedidos.length > 0 && (
+              <section style={S.card}>
+                <div style={{ ...S.linha, justifyContent: "space-between" }}>
+                  <strong>
+                    {selecionados.filter((id) =>
+                      pedidos.some((v) => v.id === id)
+                    ).length}{" "}
+                    selecionados
+                  </strong>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelecionados(
+                        pedidos.every((v) =>
+                          selecionados.includes(v.id)
+                        )
+                          ? []
+                          : pedidos.map((v) => v.id)
+                      )
+                    }
+                    style={{
+                      background: "transparent",
+                      border: 0,
+                      color: LARANJA,
+                      fontSize: 12,
+                      fontWeight: 800,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Selecionar todos
+                  </button>
+                </div>
+
+                <Botao
+                  disabled={
+                    ocupado ||
+                    !selecionados.some((id) =>
+                      pendentes.some((v) => v.id === id)
+                    )
+                  }
+                  onClick={() => void marcarPedidosFeitos()}
+                  style={{ width: "100%", marginTop: 13 }}
+                >
+                  ✓ Marcar como pedido feito
+                </Botao>
+
+                <Botao
+                  variante="secundario"
+                  disabled={
+                    ocupado ||
+                    !selecionados.some((id) =>
+                      comprados.some((v) => v.id === id)
+                    )
+                  }
+                  onClick={() => void confirmarChegada()}
+                  style={{ width: "100%", marginTop: 9 }}
+                >
+                  📦 Confirmar chegada
+                </Botao>
+
+                <p style={S.pequeno}>
+                  Ao confirmar a chegada, as unidades recebidas são
+                  adicionadas ao estoque e os itens saem da lista.
+                </p>
+              </section>
+            )}
+          </>
+        )}
+
+        {tela === "pedidos_especiais" && (
+          <>
+            <h1 style={S.titulo}>Pedidos especiais</h1>
+
+            <p style={S.pequeno}>
+              Encomendas específicas dos clientes.
+            </p>
+
+            {funcionario && (
+              <Botao
+                onClick={() => setMostrarEspecial(!mostrarEspecial)}
+                style={{ width: "100%", marginBottom: 14 }}
+              >
+                {mostrarEspecial
+                  ? "Fechar cadastro"
+                  : "+ Novo pedido especial"}
+              </Botao>
+            )}
+
+            {mostrarEspecial && funcionario && (
+              <FormularioEspecial
+                form={formEspecial}
+                setForm={setFormEspecial}
+                ocupado={ocupado}
+                salvar={() => void salvarEspecial()}
+                cancelar={() => {
+                  setMostrarEspecial(false);
+                  setFormEspecial(especialVazio());
+                }}
+              />
+            )}
+
+            {especiais.length === 0 && (
+              <section style={S.card}>
+                Nenhum pedido especial cadastrado.
+              </section>
+            )}
+
+            {especiais.map((p) => (
+              <section key={p.id} style={S.card}>
+                <div
+                  style={{
+                    ...S.linha,
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <strong>{p.nome_cliente}</strong>
+
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 800,
+                      color:
+                        p.status === "recebido"
+                          ? "#7ddd95"
+                          : p.status === "pedido_feito"
+                          ? LARANJA
+                          : "#f0bf74",
+                    }}
+                  >
+                    {p.status === "pendente"
+                      ? "PENDENTE"
+                      : p.status === "pedido_feito"
+                      ? "PEDIDO FEITO"
+                      : "RECEBIDO"}
+                  </span>
+                </div>
+
+                <p>📱 {p.modelo_aparelho}</p>
+
+                <p
+                  style={{
+                    color: "#c9d1de",
+                    whiteSpace: "pre-wrap",
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {p.descricao}
+                </p>
+
+                <p style={S.pequeno}>
+                  Telefone: {p.telefone}
+                </p>
+
+                <p style={S.pequeno}>
+                  Cadastrado em{" "}
+                  {new Date(p.created_at).toLocaleDateString("pt-BR")}
+                </p>
+
+                {funcionario && (
+                  <div style={S.linha}>
+                    {p.status === "pendente" && (
+                      <Botao
+                        disabled={ocupado}
+                        onClick={() =>
+                          void atualizarEspecial(p, "pedido_feito")
+                        }
+                      >
+                        ✓ Pedido feito
+                      </Botao>
+                    )}
+
+                    {p.status === "pedido_feito" && (
+                      <Botao
+                        disabled={ocupado}
+                        onClick={() =>
+                          void atualizarEspecial(p, "recebido")
+                        }
+                      >
+                        📦 Recebido
+                      </Botao>
+                    )}
+
+                    <Botao
+                      variante="perigo"
+                      disabled={ocupado}
+                      onClick={() => void excluirEspecial(p)}
+                    >
+                      Apagar
+                    </Botao>
+                  </div>
+                )}
+              </section>
+            ))}
+          </>
+        )}
+
+        {tela === "pecas" && (
+          <>
+            <h1 style={S.titulo}>Consulta de Peças</h1>
+
+            <div style={{ ...S.linha, marginBottom: 15 }}>
+              <Botao
+                variante="secundario"
+                onClick={() => setSecaoPecas("consultar")}
+              >
+                Consultar
+              </Botao>
+
+              {admin && (
+                <>
+                  <Botao
+                    variante="secundario"
+                    onClick={() => {
+                      limparPeca();
+                      setSecaoPecas("cadastrar");
+                    }}
+                  >
+                    Cadastrar
+                  </Botao>
+
+                  <Botao
+                    variante="secundario"
+                    onClick={() => {
+                      setSecaoPecas("todos");
+                      setPaginaPecas(1);
+                    }}
+                  >
+                    Todos os preços
+                  </Botao>
+                </>
+              )}
+            </div>
+
+            {secaoPecas === "consultar" && (
+              <section style={S.card}>
+                <Campo rotulo="Tipo de peça">
+                  <select
+                    style={S.input}
+                    value={tipoPeca}
+                    onChange={(e) => setTipoPeca(e.target.value)}
+                  >
+                    <option value="">Todos os tipos</option>
+
+                    {TIPOS_PECAS.map((t) => (
+                      <option key={t}>{t}</option>
+                    ))}
+                  </select>
+                </Campo>
+
+                <Campo rotulo="Marca">
+                  <select
+                    style={S.input}
+                    value={marcaPeca}
+                    onChange={(e) => {
+                      setMarcaPeca(e.target.value);
+                      setModeloPeca("");
+                    }}
+                  >
+                    <option value="">Todas as marcas</option>
+
+                    {MARCAS.map((m) => (
+                      <option key={m}>{m}</option>
+                    ))}
+                  </select>
+                </Campo>
+
+                <Campo rotulo="Modelo">
+                  <input
+                    style={S.input}
+                    list="modelos-pecas"
+                    value={modeloPeca}
+                    placeholder="Digite ou selecione o modelo"
+                    onChange={(e) => setModeloPeca(e.target.value)}
+                  />
+
+                  <datalist id="modelos-pecas">
+                    {modelosPecas.map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                </Campo>
+
+                <Botao
+                  onClick={() => {
+                    setPesquisouPecas(true);
+                    setPaginaPecas(1);
+                  }}
+                  style={{ width: "100%" }}
+                >
+                  Buscar peças
+                </Botao>
+              </section>
+            )}
+
+            {secaoPecas === "cadastrar" && admin && (
+              <section style={S.card}>
+                <h3>
+                  {editandoPeca ? "Editar preço" : "Cadastrar preço"}
+                </h3>
+
+                <Campo rotulo="Tipo de peça">
+                  <select
+                    style={S.input}
+                    value={formPeca.tipo_peca}
+                    onChange={(e) =>
+                      setFormPeca((a) => ({
+                        ...a,
+                        tipo_peca: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Selecione</option>
+
+                    {[
+                      ...new Set(
+                        [...TIPOS_PECAS, formPeca.tipo_peca].filter(Boolean)
+                      ),
+                    ].map((t) => (
+                      <option key={t}>{t}</option>
+                    ))}
+                  </select>
+                </Campo>
+
+                <Campo rotulo="Marca">
+                  <select
+                    style={S.input}
+                    value={formPeca.marca}
+                    onChange={(e) =>
+                      setFormPeca((a) => ({
+                        ...a,
+                        marca: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Selecione</option>
+
+                    {MARCAS.map((m) => (
+                      <option key={m}>{m}</option>
+                    ))}
+                  </select>
+                </Campo>
+
+                <Campo rotulo="Modelo">
+                  <input
+                    style={S.input}
+                    value={formPeca.modelo}
+                    onChange={(e) =>
+                      setFormPeca((a) => ({
+                        ...a,
+                        modelo: e.target.value,
+                      }))
+                    }
+                  />
+                </Campo>
+
+                <Campo rotulo="Qualidade">
+                  <select
+                    style={S.input}
+                    value={formPeca.qualidade}
+                    onChange={(e) =>
+                      setFormPeca((a) => ({
+                        ...a,
+                        qualidade: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Selecione</option>
+
+                    {[
+                      ...new Set(
+                        [...QUALIDADES, formPeca.qualidade].filter(Boolean)
+                      ),
+                    ].map((q) => (
+                      <option key={q}>{q}</option>
+                    ))}
+                  </select>
+                </Campo>
+
+                <Campo rotulo="Valor de custo">
+                  <input
+                    style={S.input}
+                    inputMode="decimal"
+                    value={formPeca.valor_custo}
+                    onChange={(e) =>
+                      setFormPeca((a) => ({
+                        ...a,
+                        valor_custo: e.target.value,
+                      }))
+                    }
+                  />
+                </Campo>
+
+                <Campo rotulo="Valor final">
+                  <input
+                    style={S.input}
+                    inputMode="decimal"
+                    value={formPeca.valor_final}
+                    onChange={(e) =>
+                      setFormPeca((a) => ({
+                        ...a,
+                        valor_final: e.target.value,
+                      }))
+                    }
+                  />
+                </Campo>
+
+                <Botao
+                  disabled={ocupado}
+                  onClick={() => void salvarPeca()}
+                  style={{ width: "100%" }}
+                >
+                  Salvar preço
+                </Botao>
+
+                {editandoPeca && (
+                  <Botao
+                    variante="secundario"
+                    onClick={limparPeca}
+                    style={{ width: "100%", marginTop: 8 }}
+                  >
+                    Cancelar edição
+                  </Botao>
+                )}
+              </section>
+            )}
+
+            {secaoPecas !== "cadastrar" &&
+              listaPecas.length === 0 &&
+              (secaoPecas === "todos" || pesquisouPecas) && (
+                <p style={S.pequeno}>
+                  Nenhuma peça encontrada.
+                </p>
+              )}
+
+            {secaoPecas !== "cadastrar" &&
+              pecasPagina.map((p) => (
+                <section key={p.id} style={S.card}>
+                  <strong>
+                    {p.marca} {p.modelo}
+                  </strong>
+
+                  <p style={S.pequeno}>
+                    {p.tipo_peca} · {p.qualidade}
+                  </p>
+
+                  <strong
+                    style={{
+                      display: "block",
+                      color: LARANJA,
+                      fontSize: 21,
+                      marginTop: 8,
+                    }}
+                  >
+                    {dinheiro(p.valor_final)}
+                  </strong>
+
+                  {admin && (
+                    <>
+                      <p style={S.pequeno}>
+                        Custo: {dinheiro(p.valor_custo)}
+                      </p>
+
+                      <div style={S.linha}>
+                        <Botao
+                          variante="secundario"
+                          onClick={() => editarPeca(p)}
+                        >
+                          Editar
+                        </Botao>
+
+                        <Botao
+                          variante="perigo"
+                          onClick={() => void excluirPeca(p)}
+                        >
+                          Excluir
+                        </Botao>
+                      </div>
+                    </>
+                  )}
+                </section>
+              ))}
+
+            {secaoPecas !== "cadastrar" &&
+              totalPaginasPecas > 1 && (
+                <div
+                  style={{
+                    ...S.linha,
+                    justifyContent: "center",
+                    marginTop: 15,
+                  }}
+                >
+                  <Botao
+                    variante="secundario"
+                    disabled={paginaPecas <= 1}
+                    onClick={() => setPaginaPecas((p) => p - 1)}
+                  >
+                    Anterior
+                  </Botao>
+
+                  <span style={S.pequeno}>
+                    {paginaPecas} / {totalPaginasPecas}
+                  </span>
+
+                  <Botao
+                    variante="secundario"
+                    disabled={paginaPecas >= totalPaginasPecas}
+                    onClick={() => setPaginaPecas((p) => p + 1)}
+                  >
+                    Próxima
+                  </Botao>
+                </div>
+              )}
+          </>
+        )}
+
+        {tela === "informacoes" && (
+          <>
+            <h1 style={S.titulo}>Informações técnicas</h1>
+
+            {admin && (
+              <section style={S.card}>
+                <h3>
+                  {editandoInfo
+                    ? "Editar informação"
+                    : "Cadastrar informação"}
+                </h3>
+
+                <Campo rotulo="Título">
+                  <input
+                    style={S.input}
+                    value={tituloInfo}
+                    onChange={(e) => setTituloInfo(e.target.value)}
+                  />
+                </Campo>
+
+                <Campo rotulo="Conteúdo">
+                  <textarea
+                    style={{
+                      ...S.input,
+                      minHeight: 130,
+                      resize: "vertical",
+                    }}
+                    value={conteudoInfo}
+                    onChange={(e) => setConteudoInfo(e.target.value)}
+                  />
+                </Campo>
+
+                <Botao
+                  disabled={ocupado}
+                  onClick={() => void salvarInfo()}
+                  style={{ width: "100%" }}
+                >
+                  Salvar informação
+                </Botao>
+
+                {editandoInfo && (
+                  <Botao
+                    variante="secundario"
+                    onClick={limparInfo}
+                    style={{ width: "100%", marginTop: 8 }}
+                  >
+                    Cancelar edição
+                  </Botao>
+                )}
+              </section>
+            )}
+
+            {informacoes.map((info) => (
+              <section key={info.id} style={S.card}>
+                <h3>{info.titulo}</h3>
+
+                <p
+                  style={{
+                    whiteSpace: "pre-wrap",
+                    overflowWrap: "anywhere",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {info.conteudo}
+                </p>
+
+                {admin && (
+                  <div style={S.linha}>
+                    <Botao
+                      variante="secundario"
+                      onClick={() => {
+                        setEditandoInfo(info.id);
+                        setTituloInfo(info.titulo);
+                        setConteudoInfo(info.conteudo);
+                        window.scrollTo(0, 0);
+                      }}
+                    >
+                      Editar
+                    </Botao>
+
+                    <Botao
+                      variante="perigo"
+                      onClick={() => void excluirInfo(info)}
+                    >
+                      Excluir
+                    </Botao>
+                  </div>
+                )}
+              </section>
+            ))}
           </>
         )}
       </main>
+
+      <nav
+  style={{
+    ...S.nav,
+    display: tela === "inicio" ? "none" : "grid",
+  }}
+>
+        {(
+          [
+            ["inicio", "⌂", "Início"],
+            ["pecas", "🔧", "Peças"],
+            ["informacoes", "ⓘ", "Informações"],
+            ["estoque", "▣", "Estoque"],
+          ] as [Tela, string, string][]
+        ).map(([destino, icone, nome]) => (
+          <button
+            key={destino}
+            type="button"
+            onClick={() => navegar(destino)}
+            style={{
+              background: "transparent",
+              border: 0,
+              color: tela === destino ? LARANJA : "#9da7b8",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 4,
+              padding: "5px 2px",
+              minWidth: 0,
+              cursor: "pointer",
+            }}
+          >
+            <span style={{ fontSize: 21 }}>{icone}</span>
+
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                textAlign: "center",
+              }}
+            >
+              {nome}
+            </span>
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }
-
-// =====================================
-// ESTILOS — LARANJA E PRETO
-// =====================================
-
-const page = {
-  background: "#050505",
-  color: "#fff",
-  minHeight: "100vh",
-  fontFamily: "Arial, sans-serif",
-  display: "flex",
-  overflowX: "hidden" as const,
-};
-
-const sidebar = {
-  width: 118,
-  background: "linear-gradient(180deg, #111, #050505)",
-  borderRight: "1px solid #292929",
-  minHeight: "100vh",
-  padding: "24px 8px",
-  boxSizing: "border-box" as const,
-  flexShrink: 0,
-};
-
-const sidebarTitle = {
-  color: "#ff6600",
-  fontSize: 20,
-  fontWeight: "900",
-  lineHeight: 1.08,
-  margin: 0,
-};
-
-const orangeLine = {
-  height: 2,
-  width: "100%",
-  background: "#ff6600",
-  margin: "18px 0 22px",
-};
-
-const profileBox = {
-  textAlign: "center" as const,
-  marginBottom: 24,
-};
-
-const profileIcon = { fontSize: 23 };
-
-const profileText = {
-  fontSize: 12,
-  lineHeight: 1.3,
-  margin: "6px 0 0",
-  color: "#fff",
-};
-
-const menuButton = {
-  width: "100%",
-  minHeight: 64,
-  background: "rgba(255,255,255,0.02)",
-  color: "#fff",
-  border: "1px solid #2b2b2b",
-  borderRadius: 10,
-  padding: 7,
-  marginBottom: 10,
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-  gap: 7,
-  fontSize: 11,
-  lineHeight: 1.15,
-  textAlign: "left" as const,
-};
-
-const activeMenuButton = {
-  ...menuButton,
-  border: "1px solid #ff6600",
-  boxShadow: "inset 3px 0 0 #ff6600",
-};
-
-const menuIcon = {
-  color: "#ff6600",
-  fontSize: 23,
-  fontWeight: "bold",
-};
-
-const logoutButton = {
-  ...menuButton,
-  color: "#ff4444",
-  marginTop: 18,
-};
-
-const exitIcon = {
-  color: "#ff6600",
-  fontSize: 20,
-};
-
-const content = {
-  flex: 1,
-  padding: "24px 10px 22px",
-  boxSizing: "border-box" as const,
-  maxWidth: "calc(100vw - 118px)",
-};
-
-const mainTitle = {
-  color: "#fff",
-  fontSize: 20,
-  lineHeight: 1.08,
-  textAlign: "center" as const,
-  margin: "0 auto 18px",
-  fontWeight: "800",
-};
-
-const subTitle = {
-  color: "#c9c9c9",
-  fontSize: 15,
-  textAlign: "center" as const,
-  margin: "0 0 15px",
-  fontWeight: "400",
-};
-
-const listBox = {
-  display: "flex",
-  flexDirection: "column" as const,
-  gap: 10,
-};
-
-const pieceCard = {
-  background: "linear-gradient(180deg, #141414, #0c0c0c)",
-  border: "1px solid #2b2b2b",
-  borderRadius: 11,
-  padding: 9,
-  display: "grid",
-  gridTemplateColumns: "44px 1fr 1px 90px",
-  gap: 8,
-  alignItems: "center",
-  minHeight: 88,
-};
-
-const brandLogo = {
-  width: 38,
-  height: 38,
-  borderRadius: 9,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontWeight: "900",
-  fontSize: 13,
-  justifySelf: "center",
-};
-
-const infoBox = { minWidth: 0 };
-
-const pieceTitle = {
-  margin: "0 0 7px",
-  fontSize: 12,
-  lineHeight: 1.15,
-  fontWeight: "800",
-};
-
-const pieceText = {
-  margin: "4px 0",
-  fontSize: 10.5,
-  color: "#d6d6d6",
-};
-
-const orangeText = { color: "#ff6600" };
-
-const divider = {
-  width: 1,
-  height: 58,
-  background: "#303030",
-};
-
-const priceArea = { textAlign: "right" as const };
-
-const priceLabel = {
-  margin: 0,
-  fontSize: 10,
-  fontWeight: "bold",
-};
-
-const price = {
-  margin: "4px 0 8px",
-  color: "#ff6600",
-  fontSize: 15,
-  whiteSpace: "nowrap" as const,
-};
-
-const actionBox = {
-  display: "flex",
-  justifyContent: "flex-end",
-  gap: 6,
-};
-
-const editButton = {
-  width: 30,
-  height: 30,
-  borderRadius: 7,
-  background: "rgba(255,255,255,0.04)",
-  color: "#fff",
-  border: "1px solid #4a4a4a",
-  fontSize: 15,
-  cursor: "pointer",
-};
-
-const deleteButton = {
-  width: 30,
-  height: 30,
-  borderRadius: 7,
-  background: "rgba(255,0,0,0.08)",
-  color: "#ff6b6b",
-  border: "1px solid #d32f2f",
-  fontSize: 14,
-  cursor: "pointer",
-};
-
-const pagination = {
-  borderTop: "1px solid #222",
-  marginTop: 18,
-  paddingTop: 15,
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr 1fr",
-  alignItems: "center",
-  gap: 6,
-  textAlign: "center" as const,
-};
-
-const pageButton = {
-  background: "transparent",
-  color: "#ddd",
-  border: "1px solid #333",
-  borderRadius: 7,
-  padding: "10px 6px",
-  fontSize: 12,
-  cursor: "pointer",
-};
-
-const nextButton = {
-  background: "#ff6600",
-  color: "#fff",
-  border: "none",
-  borderRadius: 7,
-  padding: "10px 6px",
-  fontSize: 12,
-  cursor: "pointer",
-};
-
-const pageText = { fontSize: 12 };
-
-const totalText = {
-  gridColumn: "1 / 4",
-  color: "#bfbfbf",
-  margin: 0,
-  fontSize: 12,
-};
-
-const searchCard = {
-  background: "#111",
-  border: "1px solid #333",
-  borderRadius: 11,
-  padding: 12,
-  marginBottom: 15,
-};
-
-const sectionTitle = {
-  marginTop: 0,
-  textAlign: "center" as const,
-  fontSize: 16,
-};
-
-const input = {
-  width: "100%",
-  padding: 11,
-  marginBottom: 10,
-  borderRadius: 8,
-  border: "1px solid #333",
-  background: "#111",
-  color: "#fff",
-  boxSizing: "border-box" as const,
-  fontSize: 16,
-};
-
-const button = {
-  width: "100%",
-  background: "#ff6600",
-  color: "#fff",
-  border: "none",
-  padding: 12,
-  borderRadius: 8,
-  fontWeight: "bold",
-  fontSize: 14,
-  cursor: "pointer",
-};
-
-const secondaryButton = {
-  width: "100%",
-  background: "#222",
-  color: "#fff",
-  border: "1px solid #555",
-  padding: 10,
-  borderRadius: 8,
-  fontSize: 12,
-  cursor: "pointer",
-  marginBottom: 10,
-};
-
-const emptyCard = {
-  background: "#111",
-  border: "1px solid #333",
-  padding: 18,
-  borderRadius: 10,
-  color: "#aaa",
-  textAlign: "center" as const,
-};
-
-const loginPage = {
-  background: "#050505",
-  color: "#fff",
-  minHeight: "100vh",
-  fontFamily: "Arial",
-  display: "flex",
-  flexDirection: "column" as const,
-  alignItems: "center",
-  justifyContent: "center",
-  padding: 20,
-};
-
-const loginTitle = {
-  color: "#ff6600",
-  fontSize: 42,
-  margin: 0,
-  fontWeight: "900",
-  textAlign: "center" as const,
-};
-
-const loginSubtitle = {
-  color: "#fff",
-  fontSize: 18,
-  marginTop: 8,
-  marginBottom: 25,
-  textAlign: "center" as const,
-};
-
-const loginCard = {
-  background: "#111",
-  padding: 25,
-  borderRadius: 16,
-  width: "100%",
-  maxWidth: 420,
-  border: "1px solid #333",
-  boxSizing: "border-box" as const,
-};
-
-const loginInput = {
-  width: "100%",
-  padding: 15,
-  marginBottom: 14,
-  borderRadius: 8,
-  border: "1px solid #333",
-  background: "#111",
-  color: "#fff",
-  boxSizing: "border-box" as const,
-  fontSize: 16,
-};
-
-const loginButton = {
-  width: "100%",
-  background: "#ff6600",
-  color: "#fff",
-  border: "none",
-  padding: 15,
-  borderRadius: 8,
-  fontWeight: "bold",
-  fontSize: 16,
-  cursor: "pointer",
-};
