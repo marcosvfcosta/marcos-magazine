@@ -15,6 +15,7 @@ type Capinha = {
   quantidade_comprar: number;
   status_pedido: string;
   imagem_url: string | null;
+  ordem?: number | null;
 };
 
 type Props = {
@@ -132,8 +133,12 @@ export default function GaleriaCapinhas({
   const [carregando, setCarregando] = useState(true);
   const [enviando, setEnviando] = useState(false);
   const [fotoAberta, setFotoAberta] = useState<string | null>(null);
+  const [fotoItemAberto, setFotoItemAberto] = useState<Capinha | null>(null);
   const [excluirItem, setExcluirItem] = useState<Capinha | null>(null);
   const [escolherOrigem, setEscolherOrigem] = useState(false);
+  const [salvandoOrdem, setSalvandoOrdem] = useState(false);
+  const [movendoId, setMovendoId] = useState<string | null>(null);
+  const arrasteRef = useRef<{ id: string; ativo: boolean; x: number; y: number } | null>(null);
 
   const cameraRef = useRef<HTMLInputElement>(null);
   const galeriaRef = useRef<HTMLInputElement>(null);
@@ -141,6 +146,14 @@ export default function GaleriaCapinhas({
     null
   );
   const pressionouRef = useRef(false);
+
+  function ordenar(itens: Capinha[]) {
+    return [...itens].sort((a, b) => {
+      const oa = a.ordem ?? Number.MAX_SAFE_INTEGER;
+      const ob = b.ordem ?? Number.MAX_SAFE_INTEGER;
+      return oa - ob || a.nome.localeCompare(b.nome, "pt-BR");
+    });
+  }
 
   async function carregar() {
     const { data, error } = await supabase
@@ -151,7 +164,7 @@ export default function GaleriaCapinhas({
 
     if (error) throw error;
 
-    setCapinhas((data || []) as Capinha[]);
+    setCapinhas(ordenar((data || []) as Capinha[]));
   }
 
   useEffect(() => {
@@ -170,7 +183,7 @@ export default function GaleriaCapinhas({
         if (error) throw error;
 
         if (ativo) {
-          setCapinhas((data || []) as Capinha[]);
+          setCapinhas(ordenar((data || []) as Capinha[]));
         }
       } catch (erro) {
         if (ativo) {
@@ -198,7 +211,7 @@ export default function GaleriaCapinhas({
   }, [produtoId]);
 
   const fotos = capinhas.filter((item) => {
-    if (!item.imagem_url || Number(item.quantidade) <= 0) {
+    if (!item.imagem_url) {
       return false;
     }
 
@@ -220,30 +233,106 @@ export default function GaleriaCapinhas({
     }
   }
 
-  function iniciarPressao(item: Capinha) {
+  async function ajustarQuantidade(item: Capinha, delta: number) {
+    if (!podeEditar || enviando || salvandoOrdem) return;
+    const anterior = Number(item.quantidade);
+    if (delta < 0 && anterior <= 0) return;
+    const nova = anterior + delta;
+    setEnviando(true);
+    try {
+      const { data, error } = await supabase.from("estoque_variacoes")
+        .update({ quantidade: nova, updated_at: new Date().toISOString() })
+        .eq("id", item.id).eq("quantidade", anterior).select("id");
+      if (error) throw error;
+      if (!data?.length) throw new Error("O estoque foi alterado em outro aparelho. Atualize e tente novamente.");
+      setCapinhas(atual => atual.map(c => c.id === item.id ? { ...c, quantidade: nova } : c));
+      onAtualizar?.();
+    } catch (erro) {
+      alert("Não foi possível atualizar a quantidade: " + (erro instanceof Error ? erro.message : String(erro)));
+      await carregar();
+    } finally { setEnviando(false); }
+  }
+
+  async function mudarPosicao(origemId: string, destinoId: string) {
+    if (origemId === destinoId || salvandoOrdem || !podeEditar) return;
+    const visiveis = fotos.map(c => c.id);
+    const inicio = visiveis.indexOf(origemId);
+    const fim = visiveis.indexOf(destinoId);
+    if (inicio < 0 || fim < 0) return;
+    const novaOrdem = [...visiveis];
+    novaOrdem.splice(inicio, 1);
+    novaOrdem.splice(fim, 0, origemId);
+    // Preserva a posição dos itens das outras divisões.
+    const conjunto = new Set(visiveis);
+    let cursor = 0;
+    const todos = capinhas.map(c => conjunto.has(c.id) ? novaOrdem[cursor++] : c.id);
+    const antigos = capinhas;
+    setCapinhas(todos.map((id, i) => ({ ...antigos.find(c => c.id === id)!, ordem: i + 1 })));
+    setSalvandoOrdem(true);
+    try {
+      for (let i = 0; i < todos.length; i++) {
+        const { data, error } = await supabase.from("estoque_variacoes")
+          .update({ ordem: i + 1 }).eq("id", todos[i]).select("id");
+        if (error) throw error;
+        if (!data?.length) throw new Error("Sem permissão para salvar a ordem.");
+      }
+      onAtualizar?.();
+    } catch (erro) {
+      alert("Não foi possível salvar a ordem. Execute o SQL enviado antes de usar esta função. Detalhes: " + (erro instanceof Error ? erro.message : String(erro)));
+      await carregar();
+    } finally { setSalvandoOrdem(false); }
+  }
+
+  function iniciarPressao(item: Capinha, x: number, y: number) {
     limparPressao();
     pressionouRef.current = false;
-
-    if (!podeEditar) return;
-
+    if (!podeEditar || salvandoOrdem) return;
+    arrasteRef.current = { id: item.id, ativo: false, x, y };
     timerRef.current = setTimeout(() => {
+      if (arrasteRef.current?.id !== item.id) return;
+      arrasteRef.current.ativo = true;
       pressionouRef.current = true;
-      setExcluirItem(item);
-    }, 1000);
+      setMovendoId(item.id);
+    }, 650);
+  }
+
+  function moverPonteiro(x: number, y: number) {
+    const a = arrasteRef.current;
+    if (!a) return;
+    if (!a.ativo && Math.hypot(x - a.x, y - a.y) > 12) {
+      limparPressao();
+      arrasteRef.current = null;
+    }
+  }
+
+  function terminarPressao(x: number, y: number) {
+    limparPressao();
+    const a = arrasteRef.current;
+    arrasteRef.current = null;
+    setMovendoId(null);
+    if (!a?.ativo) return;
+    const destino = document.elementFromPoint(x, y)?.closest("[data-capinha-id]");
+    const destinoId = destino?.getAttribute("data-capinha-id");
+    if (destinoId) void mudarPosicao(a.id, destinoId);
+    window.setTimeout(() => { pressionouRef.current = false; }, 50);
   }
 
   function abrirFoto(item: Capinha) {
     limparPressao();
-
-    if (pressionouRef.current) {
-      pressionouRef.current = false;
-      return;
-    }
-
-    if (item.imagem_url) {
-      setFotoAberta(item.imagem_url);
-    }
+    if (pressionouRef.current) { pressionouRef.current = false; return; }
+    if (item.imagem_url) { setFotoAberta(item.imagem_url); setFotoItemAberto(item); }
   }
+
+  useEffect(() => {
+    function aoMover(e: PointerEvent) { moverPonteiro(e.clientX, e.clientY); }
+    function aoSoltar(e: PointerEvent) { terminarPressao(e.clientX, e.clientY); }
+    window.addEventListener("pointermove", aoMover);
+    window.addEventListener("pointerup", aoSoltar);
+    return () => {
+      window.removeEventListener("pointermove", aoMover);
+      window.removeEventListener("pointerup", aoSoltar);
+    };
+  });
 
   async function receberFoto(
     evento: ChangeEvent<HTMLInputElement>
@@ -426,6 +515,10 @@ export default function GaleriaCapinhas({
             fontSize: 23,
             margin: "24px 0 5px",
             fontWeight: 800,
+            
+color: "#FFFFFF",
+WebkitTextFillColor: "#FFFFFF",
+
           }}
         >
           {modelo}
@@ -506,35 +599,28 @@ export default function GaleriaCapinhas({
         ) : (
           <div style={estilos.grade}>
             {fotos.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onPointerDown={() => iniciarPressao(item)}
-                onPointerUp={limparPressao}
-                onPointerLeave={limparPressao}
-                onPointerCancel={limparPressao}
-                onContextMenu={(e) => e.preventDefault()}
-                onClick={() => abrirFoto(item)}
-                style={{
-                  position: "relative",
-                  aspectRatio: "3 / 4",
-                  padding: 0,
-                  background: C.card,
-                  border: `1px solid ${C.borda}`,
-                  borderRadius: 12,
-                  cursor: "pointer",
-                  overflow: "hidden",
-                  touchAction: "pan-y",
-                }}
-                aria-label="Abrir foto da capinha"
-              >
-                <img
-                  src={item.imagem_url || ""}
-                  alt="Capinha cadastrada"
-                  draggable={false}
-                  style={estilos.foto}
-                />
-              </button>
+              <div key={item.id} data-capinha-id={item.id}
+                onPointerDown={e => { if (e.target instanceof Element && e.target.closest("button")) return; iniciarPressao(item, e.clientX, e.clientY); }}
+                onPointerCancel={() => { limparPressao(); arrasteRef.current = null; setMovendoId(null); }}
+                onContextMenu={e => e.preventDefault()}
+                style={{ background: C.card, border: `2px solid ${movendoId === item.id ? C.laranja : C.borda}`,
+                  borderRadius: 12, overflow: "hidden", touchAction: movendoId === item.id ? "none" : "pan-y",
+                  opacity: movendoId === item.id ? 0.7 : 1 }}>
+                <div onClick={() => abrirFoto(item)}
+                  style={{ aspectRatio: "3 / 4", cursor: "pointer", touchAction: "pan-y" }}>
+                  <img src={item.imagem_url || ""} alt="Capinha cadastrada" draggable={false} style={estilos.foto} />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2,
+                  background: "#222B39", padding: "5px 3px" }}>
+                  <button type="button" disabled={!podeEditar || enviando || salvandoOrdem || item.quantidade <= 0}
+                    onClick={() => void ajustarQuantidade(item, -1)}
+                    style={{ ...estilos.botao, padding: 0, minWidth: 28, height: 31, background: "#303744", opacity: item.quantidade <= 0 ? .45 : 1 }}>−</button>
+                  <strong style={{ color: C.texto, fontSize: 16 }}>{item.quantidade}</strong>
+                  <button type="button" disabled={!podeEditar || enviando || salvandoOrdem}
+                    onClick={() => void ajustarQuantidade(item, 1)}
+                    style={{ ...estilos.botao, padding: 0, minWidth: 28, height: 31, background: C.laranja }}>+</button>
+                </div>
+              </div>
             ))}
 
             {podeEditar && (
@@ -690,11 +776,11 @@ export default function GaleriaCapinhas({
       {fotoAberta && (
         <div
           style={estilos.modal}
-          onClick={() => setFotoAberta(null)}
+          onClick={() => { setFotoAberta(null); setFotoItemAberto(null); }}
         >
           <button
             type="button"
-            onClick={() => setFotoAberta(null)}
+            onClick={() => { setFotoAberta(null); setFotoItemAberto(null); }}
             style={{
               position: "absolute",
               top: 20,
@@ -712,6 +798,10 @@ export default function GaleriaCapinhas({
             ×
           </button>
 
+          {podeEditar && fotoItemAberto && (
+            <button type="button" onClick={e => { e.stopPropagation(); setExcluirItem(fotoItemAberto); setFotoAberta(null); setFotoItemAberto(null); }}
+              style={{ ...estilos.botao, position: "absolute", bottom: 20, background: "#7C2630" }}>Excluir cadastro</button>
+          )}
           <img
             src={fotoAberta}
             alt="Capinha ampliada"

@@ -2182,7 +2182,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                 </strong>
 
                 <span style={S.pequeno}>
-                  {v.nome}
+                  {v.nome.replace(/\s*\d{12,17}\s*$/, "").trim()}
                   {p?.categoria !== "Películas"
                     ? ` · ${v.publico}`
                     : ""}
