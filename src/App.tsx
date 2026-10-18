@@ -1100,6 +1100,7 @@ export default function App() {
 
       if (nome === "admin") email = EMAIL_ADMIN;
       if (nome === "funcionario") email = EMAIL_FUNCIONARIO;
+      if (nome === "tecnico") email = "tecnico@marcosmagazine.com.br";
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
