@@ -1,5 +1,6 @@
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
+import { supabase } from "./supabase";
 import {
   BookOpen,
   ChevronRight,
@@ -21,7 +22,8 @@ type TelaFuncionario =
   | "informacoes"
   | "estoque"
   | "compras"
-  | "pedidos";
+  | "pedidos"
+  | "solicitacao";
 
 type Props = {
   onSair: () => void | Promise<void>;
@@ -41,6 +43,44 @@ export default function FuncionarioApp({
 }: Props) {
   const [tela, setTela] = useState<TelaFuncionario>("inicio");
   const [menuAberto, setMenuAberto] = useState(false);
+  const [nomeCliente, setNomeCliente] = useState("");
+  const [modeloCelular, setModeloCelular] = useState("");
+  const [servico, setServico] = useState("");
+  const [descricaoPeca, setDescricaoPeca] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [mensagem, setMensagem] = useState("");
+
+  async function enviarSolicitacao(evento: FormEvent<HTMLFormElement>) {
+    evento.preventDefault();
+    if (enviando) return;
+    setMensagem("");
+    setEnviando(true);
+    try {
+      const { data: { user }, error: erroUsuario } = await supabase.auth.getUser();
+      if (erroUsuario || !user) {
+        throw new Error("Sessão expirada. Entre novamente no sistema.");
+      }
+      const { error } = await supabase.from("solicitacoes_servico").insert({
+        nome_cliente: nomeCliente.trim(),
+        modelo_celular: modeloCelular.trim(),
+        servico: servico.trim(),
+        descricao_peca: descricaoPeca.trim() || null,
+        status: "pendente",
+        criado_por: user.id,
+      });
+      if (error) throw new Error(error.message);
+      setNomeCliente("");
+      setModeloCelular("");
+      setServico("");
+      setDescricaoPeca("");
+      setMensagem("Solicitação enviada para o técnico com sucesso!");
+    } catch (erro) {
+      setMensagem("Não foi possível enviar: " + (erro instanceof Error ? erro.message : "erro desconhecido"));
+    } finally {
+      setEnviando(false);
+    }
+  }
+
 
   function navegar(destino: TelaFuncionario) {
     setTela(destino);
@@ -506,11 +546,58 @@ export default function FuncionarioApp({
             </p>
 
             <div className="funcionario-pagina-card">
+              <button type="button" className="funcionario-botao-laranja"
+                onClick={() => navegar("solicitacao")}>
+                <ClipboardList size={20} /> Enviar para o técnico
+              </button>
+            </div>
+
+            <div className="funcionario-pagina-card">
               <h2>Pesquisa de peças</h2>
               <p>
                 A pesquisa existente será integrada a esta
                 interface na próxima etapa.
               </p>
+            </div>
+          </>
+        )}
+
+        {tela === "solicitacao" && (
+          <>
+            <h1 className="funcionario-titulo">Enviar para o técnico</h1>
+            <p className="funcionario-subtitulo">
+              Preencha os dados do serviço. A solicitação será salva no Supabase.
+            </p>
+            <div className="funcionario-pagina-card">
+              <form className="funcionario-formulario" onSubmit={(e) => void enviarSolicitacao(e)}>
+                <label className="funcionario-campo">
+                  Nome do cliente
+                  <input required maxLength={150} value={nomeCliente}
+                    onChange={(e) => setNomeCliente(e.target.value)} />
+                </label>
+                <label className="funcionario-campo">
+                  Modelo do celular
+                  <input required maxLength={150} value={modeloCelular}
+                    onChange={(e) => setModeloCelular(e.target.value)} />
+                </label>
+                <label className="funcionario-campo">
+                  Serviço solicitado
+                  <input required maxLength={250} value={servico}
+                    onChange={(e) => setServico(e.target.value)}
+                    placeholder="Ex.: Troca de tela" />
+                </label>
+                <label className="funcionario-campo">
+                  Peça / observações (opcional)
+                  <textarea value={descricaoPeca}
+                    onChange={(e) => setDescricaoPeca(e.target.value)}
+                    placeholder="Informe a peça e detalhes do serviço" />
+                </label>
+                <button type="submit" disabled={enviando}
+                  className="funcionario-botao-laranja">
+                  {enviando ? "Enviando..." : "Enviar para o técnico"}
+                </button>
+                {mensagem && <p role="status" className="funcionario-mensagem">{mensagem}</p>}
+              </form>
             </div>
           </>
         )}
@@ -671,6 +758,13 @@ export default function FuncionarioApp({
                 <X size={21} />
               </button>
             </div>
+
+            <button type="button" className="funcionario-menu-opcao"
+              onClick={() => navegar("solicitacao")}>
+              <ClipboardList size={21} />
+              <span style={{ flex: 1 }}>Enviar para o técnico</span>
+              <ChevronRight size={17} />
+            </button>
 
             <button
               type="button"

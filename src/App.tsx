@@ -3,9 +3,10 @@ import type { CSSProperties, ChangeEvent, ReactNode } from "react";
 import { supabase } from "./supabase";
 import TelaInicial from "./TelaInicial";
 import GaleriaCapinhas from "./GaleriaCapinhas";
+import TecnicoApp from "./TecnicoApp";
 
-type Perfil = "admin" | "funcionario" | "";
-type Tela = "inicio" | "estoque" | "pecas" | "informacoes" | "pedidos" | "pedidos_especiais";
+type Perfil = "admin" | "funcionario" | "tecnico";
+type Tela = "inicio" | "estoque" | "pecas" | "informacoes" | "pedidos" | "pedidos_especiais" | "acompanhar_servicos";
 type Categoria = "Capas" | "Películas" | "Outros";
 type Publico = "Feminino" | "Masculino" | "Unissex";
 type StatusEspecial = "pendente" | "pedido_feito" | "recebido";
@@ -68,6 +69,17 @@ type Especial = {
   descricao: string;
   status: StatusEspecial;
   created_at: string;
+};
+
+type SolicitacaoFuncionario = {
+  id: string;
+  nome_cliente: string;
+  modelo_celular: string;
+  servico: string;
+  descricao_peca: string | null;
+  status: string;
+  created_at: string;
+  concluido_em: string | null;
 };
 
 type Peca = {
@@ -871,7 +883,7 @@ function FormularioEspecial({
 export default function App() {
   const [verificando, setVerificando] = useState(true);
   const [logado, setLogado] = useState(false);
-  const [perfil, setPerfil] = useState<Perfil>("");
+  const [perfil, setPerfil] = useState<Perfil | "">("")
 
   const [usuario, setUsuario] = useState("");
   const [senha, setSenha] = useState("");
@@ -921,6 +933,98 @@ export default function App() {
   const [modeloPeca, setModeloPeca] = useState("");
   const [pesquisouPecas, setPesquisouPecas] = useState(false);
   const [paginaPecas, setPaginaPecas] = useState(1);
+  const [pecaSelecionada, setPecaSelecionada] = useState<Peca | null>(null);
+  const [clienteServico, setClienteServico] = useState("");
+  const [servicoSolicitado, setServicoSolicitado] = useState("");
+  const [observacoesServico, setObservacoesServico] = useState("");
+  const [enviandoServico, setEnviandoServico] = useState(false);
+  const [mensagemServico, setMensagemServico] = useState("");
+
+  const [servicosFuncionario, setServicosFuncionario] = useState<SolicitacaoFuncionario[]>([]);
+  const [erroServicos, setErroServicos] = useState("");
+  const [atualizandoServicos, setAtualizandoServicos] = useState(false);
+  const servicosAnteriores = useRef<Record<string, string>>({});
+
+  async function carregarServicosFuncionario() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data, error } = await supabase.from("solicitacoes_servico")
+      .select("id,nome_cliente,modelo_celular,servico,descricao_peca,status,created_at,concluido_em")
+      .eq("criado_por", user.id)
+      .order("created_at", { ascending: false });
+    if (error) { setErroServicos(error.message); return; }
+    const itens = (data || []) as SolicitacaoFuncionario[];
+    const anterior = servicosAnteriores.current;
+    const alterados = itens.filter((item) => anterior[item.id] && anterior[item.id] !== item.status);
+    if (alterados.length) {
+      setMensagemServico(`Status atualizado: ${alterados[0].nome_cliente} — ${alterados[0].status.replaceAll("_", " ")}`);
+    }
+    servicosAnteriores.current = Object.fromEntries(itens.map((item) => [item.id, item.status]));
+    setServicosFuncionario(itens);
+    setErroServicos("");
+  }
+
+  useEffect(() => {
+    if (!logado || !funcionario) return;
+    void carregarServicosFuncionario();
+    const intervalo = window.setInterval(() => void carregarServicosFuncionario(), 10000);
+    return () => window.clearInterval(intervalo);
+  }, [logado, perfil]);
+
+  async function apagarServico(item: SolicitacaoFuncionario) {
+    if (!funcionario || !["concluido", "nao_reparou"].includes(item.status)) return;
+    if (!window.confirm(`Apagar definitivamente do Supabase o serviço de ${item.nome_cliente}? Esta ação não poderá ser desfeita.`)) return;
+    setAtualizandoServicos(true);
+    try {
+      const { data, error } = await supabase.from("solicitacoes_servico")
+        .delete().eq("id", item.id).in("status", ["concluido", "nao_reparou"]).select("id");
+      if (error) throw error;
+      if (!data?.length) throw new Error("Exclusão não autorizada ou serviço ainda não finalizado.");
+      await carregarServicosFuncionario();
+      setMensagemServico("Serviço apagado definitivamente do Supabase.");
+    } catch (e) { setErroServicos(erroTexto(e)); }
+    finally { setAtualizandoServicos(false); }
+  }
+
+  async function enviarPecaTecnico() {
+    if (!pecaSelecionada || enviandoServico) return;
+    if (!clienteServico.trim() || !servicoSolicitado.trim()) {
+      setMensagemServico("Informe o cliente e o serviço solicitado.");
+      return;
+    }
+    setEnviandoServico(true);
+    setMensagemServico("");
+    try {
+      const { data: { user }, error: erroAuth } = await supabase.auth.getUser();
+      if (erroAuth || !user) throw new Error("Faça login novamente.");
+      const p = pecaSelecionada;
+      const descricao = [
+        `${p.tipo_peca} - ${p.marca} ${p.modelo} - ${p.qualidade}`,
+        observacoesServico.trim(),
+      ].filter(Boolean).join(" | ");
+      const { error } = await supabase.from("solicitacoes_servico").insert({
+        nome_cliente: clienteServico.trim(),
+        modelo_celular: `${p.marca} ${p.modelo}`,
+        servico: servicoSolicitado.trim(),
+        peca_id: p.id,
+        descricao_peca: descricao,
+        status: "pendente",
+        criado_por: user.id,
+      });
+      if (error) throw error;
+      setPecaSelecionada(null);
+      setClienteServico("");
+      setServicoSolicitado("");
+      setObservacoesServico("");
+      setMensagemServico("Serviço enviado ao técnico! Status: Pendente.");
+      void carregarServicosFuncionario();
+    } catch (e) {
+      setMensagemServico(`Erro ao enviar: ${erroTexto(e)}`);
+    } finally {
+      setEnviandoServico(false);
+    }
+  }
+
 
   const [tituloInfo, setTituloInfo] = useState("");
   const [conteudoInfo, setConteudoInfo] = useState("");
@@ -945,8 +1049,12 @@ export default function App() {
       throw new Error("Usuário sem perfil autorizado.");
     }
 
-    if (data.perfil !== "admin" && data.perfil !== "funcionario") {
-      throw new Error("Perfil inválido.");
+    if (
+  data.perfil !== "admin" &&
+  data.perfil !== "funcionario" &&
+  data.perfil !== "tecnico"
+) {
+  throw new Error("Perfil inválido.");
     }
 
     return data.perfil;
@@ -1175,6 +1283,8 @@ export default function App() {
     if (destino === "pedidos_especiais") {
       void carregarEspeciais().catch((e) => alert(erroTexto(e)));
     }
+
+    if (destino === "acompanhar_servicos") void carregarServicosFuncionario();
 
     if (destino === "pecas") {
       void carregarPecas().catch((e) => alert(erroTexto(e)));
@@ -2299,6 +2409,10 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
     );
   }
 
+  if (perfil === "tecnico") {
+    return <TecnicoApp onSair={sair} />;
+  }
+
   return (
     <div style={S.app}>
       <input
@@ -2412,6 +2526,13 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
             >
               📦 Pedidos especiais
             </Botao>
+
+            {funcionario && (
+              <Botao variante="secundario" onClick={() => navegar("acompanhar_servicos")}
+                style={{ width: "100%", marginBottom: 9 }}>
+                🔧 Acompanhar serviços
+              </Botao>
+            )}
 
             <Botao
               variante="perigo"
@@ -3667,10 +3788,50 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
           </>
         )}
 
+        {tela === "acompanhar_servicos" && funcionario && (
+          <>
+            <h1 style={S.titulo}>Acompanhar serviços</h1>
+            {funcionario && (
+              <section style={{ ...S.card, borderColor: "#364252" }}>
+                <div style={{ ...S.linha, justifyContent: "space-between", marginBottom: 12 }}>
+                  <h3 style={{ margin: 0 }}>Acompanhar serviços</h3>
+                  <Botao variante="secundario" disabled={atualizandoServicos} onClick={() => {
+                    setAtualizandoServicos(true);
+                    void carregarServicosFuncionario().finally(() => setAtualizandoServicos(false));
+                  }}>Atualizar</Botao>
+                </div>
+                {mensagemServico && <p role="status" style={{ color: "#ff9b53", fontWeight: 700 }}>{mensagemServico}</p>}
+                {erroServicos && <p role="alert" style={{ color: "#ff9b9b" }}>Erro ao consultar status: {erroServicos}</p>}
+                {!erroServicos && servicosFuncionario.length === 0 && <p style={S.pequeno}>Nenhum serviço enviado por este usuário.</p>}
+                {servicosFuncionario.map((item) => {
+                  const concluido = item.status === "concluido";
+                  const finalizado = concluido || item.status === "nao_reparou";
+                  const status = item.status === "nao_reparou" ? "Não reparou" : concluido ? "Concluído" : item.status === "pendente" ? "Pendente" : item.status === "em_andamento" ? "Em andamento" : item.status.replaceAll("_", " ");
+                  return (
+                    <article key={item.id} style={{ background: "#0d1420", padding: 13, borderRadius: 11, marginTop: 10, border: "1px solid #303744" }}>
+                      <div style={{ ...S.linha, justifyContent: "space-between" }}>
+                        <strong>{item.nome_cliente}</strong>
+                        <span style={{ fontWeight: 800, color: concluido ? "#6ee7a1" : item.status === "nao_reparou" ? "#ff9999" : "#ff9b53" }}>{status}</span>
+                      </div>
+                      <p style={{ margin: "8px 0 3px" }}>{item.modelo_celular} — {item.servico}</p>
+                      {item.descricao_peca && <p style={S.pequeno}>{item.descricao_peca}</p>}
+                      <small style={S.pequeno}>Enviado: {new Date(item.created_at).toLocaleString("pt-BR")}</small>
+                      {finalizado && <div style={{ marginTop: 12 }}><Botao variante="perigo" disabled={atualizandoServicos}
+                        onClick={() => void apagarServico(item)}>🗑️ Apagar serviço</Botao></div>}
+                      {item.concluido_em && <div style={S.pequeno}>Concluído: {new Date(item.concluido_em).toLocaleString("pt-BR")}</div>}
+                    </article>
+                  );
+                })}
+              </section>
+            )}
+
+
+          </>
+        )}
+
         {tela === "pecas" && (
           <>
             <h1 style={S.titulo}>Consulta de Peças</h1>
-
             <div style={{ ...S.linha, marginBottom: 15 }}>
               <Botao
                 variante="secundario"
@@ -3927,6 +4088,19 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                     {dinheiro(p.valor_final)}
                   </strong>
 
+                  {funcionario && (
+                    <Botao
+                      onClick={() => {
+                        setPecaSelecionada(p);
+                        setMensagemServico("");
+                        setServicoSolicitado(p.tipo_peca === "Tela" ? "Troca de tela" : `Troca de ${p.tipo_peca.toLowerCase()}`);
+                      }}
+                      style={{ width: "100%", marginTop: 12 }}
+                    >
+                      Selecionar peça / Enviar para o técnico
+                    </Botao>
+                  )}
+
                   {admin && (
                     <>
                       <p style={S.pequeno}>
@@ -3952,6 +4126,39 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                   )}
                 </section>
               ))}
+
+            {funcionario && mensagemServico && (
+              <section style={S.card} role="status">{mensagemServico}</section>
+            )}
+
+            {funcionario && pecaSelecionada && (
+              <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,.82)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setPecaSelecionada(null)}>
+              <section role="dialog" aria-modal="true" aria-label="Enviar peça para o técnico" onClick={(e) => e.stopPropagation()} style={{ ...S.card, borderColor: LARANJA, width: "100%", maxWidth: 510, maxHeight: "90dvh", overflowY: "auto", marginBottom: 0 }}>
+                <h3>Enviar peça para o técnico</h3>
+                <p style={S.pequeno}>
+                  Peça: {pecaSelecionada.tipo_peca} - {pecaSelecionada.marca} {pecaSelecionada.modelo} ({pecaSelecionada.qualidade})
+                </p>
+                <Campo rotulo="Modelo do aparelho">
+                  <input style={S.input} value={`${pecaSelecionada.marca} ${pecaSelecionada.modelo}`} readOnly />
+                </Campo>
+                <Campo rotulo="Nome do cliente">
+                  <input style={S.input} value={clienteServico} onChange={(e) => setClienteServico(e.target.value)} />
+                </Campo>
+                <Campo rotulo="Serviço solicitado">
+                  <input style={S.input} value={servicoSolicitado} onChange={(e) => setServicoSolicitado(e.target.value)} />
+                </Campo>
+                <Campo rotulo="Observações (opcional)">
+                  <textarea style={{ ...S.input, minHeight: 85 }} value={observacoesServico} onChange={(e) => setObservacoesServico(e.target.value)} />
+                </Campo>
+                <Botao disabled={enviandoServico} onClick={() => void enviarPecaTecnico()} style={{ width: "100%" }}>
+                  {enviandoServico ? "Enviando..." : "Confirmar envio para o técnico"}
+                </Botao>
+                <Botao variante="secundario" onClick={() => setPecaSelecionada(null)} style={{ width: "100%", marginTop: 8 }}>
+                  Cancelar
+                </Botao>
+              </section>
+              </div>
+            )}
 
             {secaoPecas !== "cadastrar" &&
               totalPaginasPecas > 1 && (
