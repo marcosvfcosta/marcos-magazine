@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./supabase";
+import { ativarNotificacoesTecnico } from "./firebasePush";
 
 type Solicitacao = {
   id: string;
@@ -16,6 +17,22 @@ export default function TecnicoApp({ onSair }: { onSair: () => void | Promise<vo
   const [carregando, setCarregando] = useState(true);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [erro, setErro] = useState("");
+  const [ativandoPush, setAtivandoPush] = useState(false);
+  const [mensagemPush, setMensagemPush] = useState("");
+
+  async function ativarPush() {
+    if (ativandoPush) return;
+    setAtivandoPush(true);
+    setMensagemPush("");
+    try {
+      await ativarNotificacoesTecnico();
+      setMensagemPush("Notificações ativadas neste aparelho. Falta configurar o envio automático pelo servidor.");
+    } catch (e) {
+      setMensagemPush(e instanceof Error ? e.message : "Não foi possível ativar as notificações.");
+    } finally {
+      setAtivandoPush(false);
+    }
+  }
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -53,6 +70,13 @@ export default function TecnicoApp({ onSair }: { onSair: () => void | Promise<vo
         <button onClick={() => void onSair()} style={botaoSecundario}>Sair</button>
       </header>
       <main style={{ maxWidth: 850, margin: "24px auto" }}>
+        <section style={{ background: "#1A202A", border: "1px solid #303744", borderRadius: 14, padding: 16, marginBottom: 20 }}>
+          <strong style={{ display: "block", marginBottom: 10 }}>🔔 Notificações de serviço</strong>
+          <button type="button" disabled={ativandoPush} onClick={() => void ativarPush()} style={botaoLaranja}>
+            {ativandoPush ? "Ativando..." : "Ativar notificações"}
+          </button>
+          {mensagemPush && <p role="status" style={{ color: "#d6e0ea", marginBottom: 0 }}>{mensagemPush}</p>}
+        </section>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <h2>Solicitações de serviço</h2>
           <button style={botaoSecundario} onClick={() => void carregar()}>Atualizar</button>

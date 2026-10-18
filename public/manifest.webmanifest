@@ -1,0 +1,14 @@
+{
+  "id": "/",
+  "name": "Marcos Magazine",
+  "short_name": "Marcos",
+  "description": "Sistema interno Marcos Magazine",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0D1118",
+  "theme_color": "#0D1118",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
