@@ -445,8 +445,8 @@ function Logo() {
           fontSize: 12,
           color: "#f5f5f5",
           fontWeight: 700,
-          textAlign: "right",
-          marginRight: 4,
+          textAlign: "center",
+          marginRight: 0,
         }}
       >
         magazine
@@ -2371,13 +2371,12 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
           </div>
 
           <section style={S.card}>
-            <h2>Entrar no sistema</h2>
+            <h2 style={{ color: "#FF6500", textAlign: "center" }}>Entrar no App</h2>
 
             <Campo rotulo="Usuário">
               <input
                 style={S.input}
                 value={usuario}
-                placeholder="@admin ou @funcionario"
                 autoComplete="username"
                 onChange={(e) => setUsuario(e.target.value)}
               />
