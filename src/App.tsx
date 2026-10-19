@@ -1978,7 +1978,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
             (!marcaPeca ||
               normalizar(p.marca) === normalizar(marcaPeca)) &&
             (!modeloPeca ||
-              normalizar(p.modelo).includes(normalizar(modeloPeca)))
+              normalizar(p.modelo) === normalizar(modeloPeca))
         )
         .sort(
           (a, b) =>
