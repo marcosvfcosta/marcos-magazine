@@ -6,6 +6,13 @@ import { supabase } from "./supabase";
 type Grupo = "Feminino" | "Masculino" | "Transparente";
 type Estilo = "Decorado" | "Case";
 
+type FotoLote = {
+  id: string;
+  arquivo: File;
+  preview: string;
+  quantidade: string;
+};
+
 type Capinha = {
   id: string;
   produto_id: string;
@@ -136,6 +143,11 @@ export default function GaleriaCapinhas({
   const [fotoItemAberto, setFotoItemAberto] = useState<Capinha | null>(null);
   const [excluirItem, setExcluirItem] = useState<Capinha | null>(null);
   const [escolherOrigem, setEscolherOrigem] = useState(false);
+  const [fotosLote, setFotosLote] = useState<FotoLote[]>([]);
+  const [mostrarLote, setMostrarLote] = useState(false);
+  const [quantidadeTodas, setQuantidadeTodas] = useState("1");
+  const [progressoLote, setProgressoLote] = useState("");
+  const fotosLoteRef = useRef<FotoLote[]>([]);
   const [salvandoOrdem, setSalvandoOrdem] = useState(false);
   const [movendoId, setMovendoId] = useState<string | null>(null);
   const arrasteRef = useRef<{ id: string; ativo: boolean; x: number; y: number } | null>(null);
@@ -146,6 +158,17 @@ export default function GaleriaCapinhas({
     null
   );
   const pressionouRef = useRef(false);
+
+  // Mantém os links temporários das fotos para liberá-los ao sair da galeria.
+  useEffect(() => {
+    fotosLoteRef.current = fotosLote;
+  }, [fotosLote]);
+
+  useEffect(() => {
+    return () => {
+      fotosLoteRef.current.forEach((item) => URL.revokeObjectURL(item.preview));
+    };
+  }, []);
 
   function ordenar(itens: Capinha[]) {
     return [...itens].sort((a, b) => {
@@ -433,6 +456,168 @@ export default function GaleriaCapinhas({
     }
   }
 
+  function receberFotosLote(evento: ChangeEvent<HTMLInputElement>) {
+    const arquivos = Array.from(evento.target.files ?? []);
+    evento.target.value = "";
+    if (!podeEditar || enviando || !arquivos.length) return;
+
+    const validos: File[] = [];
+    let rejeitados = 0;
+    for (const arquivo of arquivos) {
+      const imagem = arquivo.type.startsWith("image/") ||
+        /\.(heic|heif|jpe?g|png|webp|gif|avif)$/i.test(arquivo.name);
+      if (!imagem || arquivo.size > 10 * 1024 * 1024) {
+        rejeitados++;
+        continue;
+      }
+      validos.push(arquivo);
+    }
+
+    if (rejeitados > 0) {
+      alert(`${rejeitados} foto(s) ignorada(s). Use imagens de até 10 MB cada.`);
+    }
+    if (!validos.length) return;
+
+    const novasFotos: FotoLote[] = validos.map((arquivo) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      arquivo,
+      preview: URL.createObjectURL(arquivo),
+      quantidade: "1",
+    }));
+
+    setFotosLote((atuais) => [...atuais, ...novasFotos]);
+    setEscolherOrigem(false);
+    setMostrarLote(true);
+    setProgressoLote("");
+  }
+
+  function mudarQuantidadeLote(id: string, valor: string) {
+    setFotosLote((atuais) =>
+      atuais.map((item) => item.id === id ? { ...item, quantidade: valor } : item)
+    );
+  }
+
+  function removerFotoLote(id: string) {
+    if (enviando) return;
+    const item = fotosLote.find((foto) => foto.id === id);
+    if (item) URL.revokeObjectURL(item.preview);
+    setFotosLote((atuais) => atuais.filter((foto) => foto.id !== id));
+  }
+
+  function fecharLote() {
+    if (enviando) return;
+    fotosLote.forEach((item) => URL.revokeObjectURL(item.preview));
+    setFotosLote([]);
+    setProgressoLote("");
+    setMostrarLote(false);
+  }
+
+  function aplicarQuantidadeTodas() {
+    if (enviando) return;
+    const quantidade = Number(quantidadeTodas);
+    if (!/^\d+$/.test(quantidadeTodas.trim()) || !Number.isSafeInteger(quantidade)) {
+      alert("Informe uma quantidade inteira igual ou maior que zero.");
+      return;
+    }
+    setFotosLote((atuais) =>
+      atuais.map((foto) => ({ ...foto, quantidade: String(quantidade) }))
+    );
+  }
+
+  async function salvarFotosLote() {
+    if (!podeEditar || enviando || !fotosLote.length) return;
+
+    const quantidades = fotosLote.map((foto) => Number(foto.quantidade));
+    if (fotosLote.some((foto, i) =>
+      !/^\d+$/.test(foto.quantidade.trim()) ||
+      !Number.isSafeInteger(quantidades[i]) || quantidades[i] < 0
+    )) {
+      alert("Confira as quantidades: cada capinha precisa de um número inteiro, a partir de zero.");
+      return;
+    }
+
+    setEnviando(true);
+    let salvas = 0;
+    const idsSalvos = new Set<string>();
+    const erros: string[] = [];
+    const hora = Date.now();
+    const publico = grupo === "Transparente" ? "Unissex" : grupo;
+    const prefixo = grupo === "Transparente" ? "[Transparente]" : `[${estilo}]`;
+
+    for (const [i, foto] of fotosLote.entries()) {
+      setProgressoLote(`Cadastrando ${i + 1} de ${fotosLote.length}...`);
+      let caminhoEnviado: string | null = null;
+
+      try {
+        const extensao = (foto.arquivo.name.split(".").pop() || "jpg")
+          .toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+        const caminho = `estoque/${hora}-${foto.id}.${extensao}`;
+        const upload = await supabase.storage.from("estoque-fotos")
+          .upload(caminho, foto.arquivo, {
+            contentType: foto.arquivo.type || undefined,
+            upsert: false,
+          });
+        if (upload.error) throw upload.error;
+        caminhoEnviado = caminho;
+
+        const { data: urlData } = supabase.storage.from("estoque-fotos")
+          .getPublicUrl(caminho);
+        const { data, error } = await supabase.from("estoque_variacoes")
+          .insert({
+            produto_id: produtoId,
+            nome: `${prefixo} ${hora}-${i + 1}-${foto.id.slice(-4)}`,
+            publico,
+            quantidade: quantidades[i],
+            quantidade_comprar: 0,
+            status_pedido: "pendente",
+            imagem_url: urlData.publicUrl,
+            updated_at: new Date().toISOString(),
+          })
+          .select("id");
+        if (error) throw error;
+        if (!data?.length) throw new Error("Cadastro não autorizado.");
+
+        idsSalvos.add(foto.id);
+        salvas++;
+      } catch (erro) {
+        if (caminhoEnviado) {
+          const { error: erroRemocao } = await supabase.storage
+            .from("estoque-fotos").remove([caminhoEnviado]);
+          if (erroRemocao) console.error("Não foi possível remover foto sem cadastro:", erroRemocao);
+        }
+        erros.push(`Foto ${i + 1}: ${erro instanceof Error ? erro.message : String(erro)}`);
+      }
+    }
+
+    const restantes = fotosLote.filter((foto) => !idsSalvos.has(foto.id));
+    fotosLote.filter((foto) => idsSalvos.has(foto.id))
+      .forEach((foto) => URL.revokeObjectURL(foto.preview));
+    setFotosLote(restantes);
+
+    let erroAtualizacao = "";
+    if (salvas > 0) {
+      try {
+        await carregar();
+        onAtualizar?.();
+      } catch (erro) {
+        erroAtualizacao = erro instanceof Error ? erro.message : String(erro);
+      }
+    }
+
+    setEnviando(false);
+    setProgressoLote("");
+    if (!restantes.length) setMostrarLote(false);
+
+    if (erros.length) {
+      alert(`${salvas} capinha(s) cadastrada(s). ${erros.length} falharam e continuam na lista para tentar novamente.\n\n${erros.slice(0, 3).join("\n")}`);
+    } else {
+      alert(`${salvas} capinha(s) cadastrada(s) com sucesso!`);
+    }
+    if (erroAtualizacao) {
+      alert(`As capinhas foram salvas, mas não foi possível atualizar a tela: ${erroAtualizacao}. Use Voltar e abra a galeria novamente.`);
+    }
+  }
+
   async function confirmarExclusao() {
     if (!excluirItem || !podeEditar || enviando) return;
 
@@ -679,9 +864,8 @@ WebkitTextFillColor: "#FFFFFF",
               lineHeight: 1.6,
             }}
           >
-            Cada foto representa uma unidade de estoque.
-            Toque para ampliar ou segure por 1 segundo
-            para excluir.
+            Cada foto representa uma capinha diferente. Ajuste o estoque com + e −.
+            Toque na foto para ampliar e excluir, ou segure para reorganizar.
           </p>
         )}
 
@@ -698,7 +882,8 @@ WebkitTextFillColor: "#FFFFFF",
           ref={galeriaRef}
           type="file"
           accept="image/*"
-          onChange={receberFoto}
+          multiple
+          onChange={receberFotosLote}
           style={{ display: "none" }}
         />
       </div>
@@ -755,7 +940,7 @@ WebkitTextFillColor: "#FFFFFF",
                 galeriaRef.current?.click();
               }}
             >
-              🖼️ Galeria
+              🖼️ Galeria (várias fotos)
             </button>
 
             <button
@@ -767,6 +952,88 @@ WebkitTextFillColor: "#FFFFFF",
               }}
               onClick={() => setEscolherOrigem(false)}
             >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mostrarLote && (
+        <div style={{ ...estilos.modal, padding: 10 }} role="dialog" aria-modal="true" aria-label="Cadastro de capinhas em lote">
+          <div style={{
+            width: "100%", maxWidth: 620, maxHeight: "93dvh", overflowY: "auto",
+            background: C.card, borderRadius: 18, border: `1px solid ${C.borda}`,
+            padding: 16, boxSizing: "border-box",
+          }}>
+            <h3 style={{ color: C.laranja, margin: "0 0 7px" }}>🖼️ Cadastrar capinhas em lote</h3>
+            <p style={{ color: C.secundario, margin: "0 0 8px", fontSize: 13 }}>
+              {modelo} · {grupo}{grupo !== "Transparente" ? ` / ${estilo}` : ""}
+            </p>
+            <p style={{ color: C.secundario, fontSize: 13, lineHeight: 1.5 }}>
+              Cada foto é uma capinha diferente. Informe quantas unidades possui de cada uma.
+            </p>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 15 }}>
+              <button type="button" disabled={enviando} onClick={() => galeriaRef.current?.click()}
+                style={{ ...estilos.botao, borderColor: C.laranja, color: C.laranja, flex: "1 1 140px" }}>
+                + Selecionar mais fotos
+              </button>
+              <label style={{ color: C.secundario, fontSize: 12 }}>
+                Qtd. para todas
+                <input type="number" min="0" step="1" value={quantidadeTodas}
+                  disabled={enviando} onChange={(e) => setQuantidadeTodas(e.target.value)}
+                  style={{ width: 70, marginLeft: 6, padding: 9, background: C.fundo,
+                    color: C.texto, border: `1px solid ${C.borda}`, borderRadius: 8 }} />
+              </label>
+              <button type="button" disabled={enviando} onClick={aplicarQuantidadeTodas}
+                style={{ ...estilos.botao, padding: "10px 12px" }}>Aplicar</button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 10 }}>
+              {fotosLote.map((foto, i) => (
+                <div key={foto.id} style={{ background: C.fundo, padding: 9, minWidth: 0,
+                  border: `1px solid ${C.borda}`, borderRadius: 12 }}>
+                  <div style={{ position: "relative" }}>
+                    <img src={foto.preview} alt={`Nova capinha ${i + 1}`}
+                      style={{ width: "100%", height: 155, objectFit: "contain",
+                        background: "#232A36", borderRadius: 8, display: "block" }} />
+                    <button type="button" aria-label={`Remover foto ${i + 1}`} disabled={enviando}
+                      onClick={() => removerFotoLote(foto.id)}
+                      style={{ position: "absolute", right: 5, top: 5, width: 30, height: 30,
+                        border: 0, borderRadius: 20, background: "#682A32", color: "#fff",
+                        fontWeight: 800, cursor: "pointer" }}>×</button>
+                  </div>
+                  <p style={{ fontSize: 12, color: C.secundario, margin: "7px 0 6px" }}>
+                    Capinha {i + 1}
+                  </p>
+                  <label style={{ fontSize: 12, color: C.texto, display: "block" }}>
+                    Quantidade em estoque
+                    <input type="number" min="0" step="1" inputMode="numeric" value={foto.quantidade}
+                      disabled={enviando} onChange={(e) => mudarQuantidadeLote(foto.id, e.target.value)}
+                      style={{ width: "100%", boxSizing: "border-box", marginTop: 5, padding: 10,
+                        border: `1px solid ${C.borda}`, borderRadius: 9,
+                        background: C.card, color: C.texto, fontSize: 16 }} />
+                  </label>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ background: C.fundo, padding: 12, borderRadius: 10, marginTop: 13,
+              display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+              <strong style={{ fontSize: 13 }}>{fotosLote.length} capinhas</strong>
+              <strong style={{ color: C.laranja, fontSize: 13 }}>
+                {fotosLote.reduce((total, foto) => total + (Number(foto.quantidade) || 0), 0)} unidades
+              </strong>
+            </div>
+            {progressoLote && <p role="status" style={{ color: C.laranja, fontSize: 13 }}>{progressoLote}</p>}
+            <button type="button" disabled={enviando || !fotosLote.length}
+              onClick={() => void salvarFotosLote()}
+              style={{ ...estilos.botao, background: C.laranja, borderColor: C.laranja,
+                width: "100%", marginTop: 13, opacity: enviando ? 0.6 : 1 }}>
+              {enviando ? "Salvando capinhas..." : `Cadastrar ${fotosLote.length} capinha(s)`}
+            </button>
+            <button type="button" disabled={enviando} onClick={fecharLote}
+              style={{ ...estilos.botao, background: "transparent", width: "100%", marginTop: 8 }}>
               Cancelar
             </button>
           </div>
