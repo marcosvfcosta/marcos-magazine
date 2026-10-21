@@ -1377,14 +1377,25 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
 
   const produtosFiltrados = useMemo(
     () =>
-      produtos.filter(
-        (p) =>
-          p.ativo &&
-          p.categoria === categoria &&
-          (!marcaFiltro ||
-            normalizar(p.marca) === normalizar(marcaFiltro)) &&
-          normalizar(`${p.marca} ${p.modelo}`).includes(normalizar(busca))
-      ),
+      produtos
+        .filter(
+          (p) =>
+            p.ativo &&
+            p.categoria === categoria &&
+            (!marcaFiltro ||
+              normalizar(p.marca) === normalizar(marcaFiltro)) &&
+            normalizar(`${p.marca} ${p.modelo}`).includes(normalizar(busca))
+        )
+        .sort((a, b) => {
+          const ordemMarca = a.marca.localeCompare(b.marca, "pt-BR", {
+            sensitivity: "base",
+          });
+          if (ordemMarca !== 0) return ordemMarca;
+          return a.modelo.localeCompare(b.modelo, "pt-BR", {
+            numeric: true,
+            sensitivity: "base",
+          });
+        }),
     [produtos, categoria, marcaFiltro, busca]
   );
 
