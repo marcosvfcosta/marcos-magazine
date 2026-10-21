@@ -1387,11 +1387,15 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
             normalizar(`${p.marca} ${p.modelo}`).includes(normalizar(busca))
         )
         .sort((a, b) => {
-          const ordemMarca = a.marca.localeCompare(b.marca, "pt-BR", {
+          const porMarca = a.marca.localeCompare(b.marca, "pt-BR", {
             sensitivity: "base",
           });
-          if (ordemMarca !== 0) return ordemMarca;
-          return a.modelo.localeCompare(b.modelo, "pt-BR", {
+          if (porMarca !== 0) return porMarca;
+
+          // "11 Pro Max" e "iPhone 11" devem ficar juntos na ordem numérica.
+          const nomeA = normalizar(a.modelo).replace(/^iphone\s*/, "");
+          const nomeB = normalizar(b.modelo).replace(/^iphone\s*/, "");
+          return nomeA.localeCompare(nomeB, "pt-BR", {
             numeric: true,
             sensitivity: "base",
           });
