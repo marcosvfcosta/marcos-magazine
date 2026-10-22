@@ -209,6 +209,16 @@ function normalizar(valor: string) {
     .trim();
 }
 
+// Mantém os nomes de tipos consistentes, inclusive para cadastros antigos.
+// A normalização é apenas na interface; nenhum registro é excluído.
+function padronizarTipoPeca(valor: string): string {
+  const chave = normalizar(valor).replace(/[^a-z0-9]/g, "");
+  if (chave === "tela" || chave === "telas") return "Tela";
+  return TIPOS_PECAS.find((tipo) =>
+    normalizar(tipo).replace(/[^a-z0-9]/g, "") === chave
+  ) ?? String(valor || "").trim();
+}
+
 function erroTexto(erro: unknown) {
   if (erro instanceof Error) return erro.message;
 
@@ -1135,7 +1145,7 @@ export default function App() {
 
     if (error) throw error;
 
-    setPecas((data || []) as Peca[]);
+    setPecas(((data || []) as Peca[]).map((p) => ({ ...p, tipo_peca: padronizarTipoPeca(p.tipo_peca) })));
   }
 
   async function carregarInformacoes() {
@@ -1966,8 +1976,13 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
     }
   }
 
-  // Os menus são preenchidos exclusivamente com as peças já cadastradas no Supabase.
-  // A comparação normalizada evita misturar grafias diferentes sem juntar modelos distintos.
+  // A lista de tipos é fixa; os demais filtros usam dados reais do Supabase.
+  function chaveTipoPeca(valor: string) {
+    const chave = normalizar(padronizarTipoPeca(valor)).replace(/[^a-z0-9]/g, "");
+    if (chave === "outros") return "outro";
+    return chave;
+  }
+
   function opcoesUnicasPecas(valores: string[]) {
     const unicos = new Map<string, string>();
     for (const valor of valores) {
@@ -1980,15 +1995,10 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
     );
   }
 
-  const tiposDisponiveisPecas = useMemo(
-    () => opcoesUnicasPecas(pecas.map((p) => p.tipo_peca)),
-    [pecas]
-  );
-
   const marcasDisponiveisPecas = useMemo(
     () => opcoesUnicasPecas(
       pecas
-        .filter((p) => !tipoPeca || normalizar(p.tipo_peca) === normalizar(tipoPeca))
+        .filter((p) => !tipoPeca || chaveTipoPeca(p.tipo_peca) === chaveTipoPeca(tipoPeca))
         .map((p) => p.marca)
     ),
     [pecas, tipoPeca]
@@ -1998,7 +2008,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
     () => opcoesUnicasPecas(
       pecas
         .filter((p) =>
-          (!tipoPeca || normalizar(p.tipo_peca) === normalizar(tipoPeca)) &&
+          (!tipoPeca || chaveTipoPeca(p.tipo_peca) === chaveTipoPeca(tipoPeca)) &&
           (!marcaPeca || normalizar(p.marca) === normalizar(marcaPeca))
         )
         .map((p) => p.modelo)
@@ -2010,7 +2020,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
     () => opcoesUnicasPecas(
       pecas
         .filter((p) =>
-          (!tipoPeca || normalizar(p.tipo_peca) === normalizar(tipoPeca)) &&
+          (!tipoPeca || chaveTipoPeca(p.tipo_peca) === chaveTipoPeca(tipoPeca)) &&
           (!marcaPeca || normalizar(p.marca) === normalizar(marcaPeca)) &&
           (!modeloPeca || normalizar(p.modelo) === normalizar(modeloPeca))
         )
@@ -2022,7 +2032,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
   const resultadosPecas = useMemo(
     () => pecas
       .filter((p) =>
-        normalizar(p.tipo_peca) === normalizar(tipoPeca) &&
+        chaveTipoPeca(p.tipo_peca) === chaveTipoPeca(tipoPeca) &&
         normalizar(p.marca) === normalizar(marcaPeca) &&
         normalizar(p.modelo) === normalizar(modeloPeca) &&
         (!qualidadePeca || normalizar(p.qualidade) === normalizar(qualidadePeca))
@@ -2060,7 +2070,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
     if (!admin || ocupado) return;
 
     const dados = {
-      tipo_peca: formPeca.tipo_peca.trim(),
+      tipo_peca: padronizarTipoPeca(formPeca.tipo_peca),
       marca: formPeca.marca.trim(),
       modelo: formPeca.modelo.trim(),
       qualidade: formPeca.qualidade.trim(),
@@ -2121,7 +2131,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
 
     setEditandoPeca(p.id);
     setFormPeca({
-      tipo_peca: p.tipo_peca,
+      tipo_peca: padronizarTipoPeca(p.tipo_peca),
       marca: p.marca,
       modelo: p.modelo,
       qualidade: p.qualidade,
@@ -3914,8 +3924,8 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
             {secaoPecas === "consultar" && (
               <section style={S.card}>
                 <p style={{ ...S.pequeno, marginTop: 0, marginBottom: 16 }}>
-                  Escolha o tipo de peça, a marca e o modelo. As opções vêm dos
-                  preços cadastrados e aparecem automaticamente, sem precisar digitar.
+                  Escolha o tipo de peça na lista. Marca, modelo e qualidade
+                  aparecem conforme as peças cadastradas, sem precisar digitar.
                 </p>
 
                 <Campo rotulo="Tipo de peça">
@@ -3932,7 +3942,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                     }}
                   >
                     <option value="">Selecione o tipo de peça</option>
-                    {tiposDisponiveisPecas.map((t) => (
+                    {TIPOS_PECAS.map((t) => (
                       <option key={t} value={t}>{t}</option>
                     ))}
                   </select>
@@ -4015,6 +4025,10 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                   <p style={{ ...S.pequeno, textAlign: "center", marginBottom: 0 }}>
                     {pecas.length === 0
                       ? "Ainda não há preços de peças cadastrados."
+                      : tipoPeca && marcasDisponiveisPecas.length === 0
+                      ? "Não há peças cadastradas para esse tipo."
+                      : tipoPeca && marcaPeca && modelosPecas.length === 0
+                      ? "Não há modelos cadastrados para essa combinação."
                       : "Selecione um modelo para visualizar as peças e os preços disponíveis."}
                   </p>
                 )}
@@ -4048,12 +4062,8 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                   >
                     <option value="">Selecione</option>
 
-                    {[
-                      ...new Set(
-                        [...TIPOS_PECAS, formPeca.tipo_peca].filter(Boolean)
-                      ),
-                    ].map((t) => (
-                      <option key={t}>{t}</option>
+                    {TIPOS_PECAS.map((t) => (
+                      <option key={t} value={t}>{t}</option>
                     ))}
                   </select>
                 </Campo>
