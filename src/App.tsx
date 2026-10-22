@@ -931,6 +931,7 @@ export default function App() {
   const [tipoPeca, setTipoPeca] = useState("");
   const [marcaPeca, setMarcaPeca] = useState("");
   const [modeloPeca, setModeloPeca] = useState("");
+  const [qualidadePeca, setQualidadePeca] = useState("");
   const [pesquisouPecas, setPesquisouPecas] = useState(false);
   const [paginaPecas, setPaginaPecas] = useState(1);
   const [pecaSelecionada, setPecaSelecionada] = useState<Peca | null>(null);
@@ -1965,47 +1966,78 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
     }
   }
 
+  // Os menus são preenchidos exclusivamente com as peças já cadastradas no Supabase.
+  // A comparação normalizada evita misturar grafias diferentes sem juntar modelos distintos.
+  function opcoesUnicasPecas(valores: string[]) {
+    const unicos = new Map<string, string>();
+    for (const valor of valores) {
+      if (valor?.trim() && !unicos.has(normalizar(valor))) {
+        unicos.set(normalizar(valor), valor.trim());
+      }
+    }
+    return [...unicos.values()].sort((a, b) =>
+      a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" })
+    );
+  }
+
+  const tiposDisponiveisPecas = useMemo(
+    () => opcoesUnicasPecas(pecas.map((p) => p.tipo_peca)),
+    [pecas]
+  );
+
+  const marcasDisponiveisPecas = useMemo(
+    () => opcoesUnicasPecas(
+      pecas
+        .filter((p) => !tipoPeca || normalizar(p.tipo_peca) === normalizar(tipoPeca))
+        .map((p) => p.marca)
+    ),
+    [pecas, tipoPeca]
+  );
+
   const modelosPecas = useMemo(
-    () =>
-      [
-        ...new Set(
-          pecas
-            .filter(
-              (p) =>
-                !marcaPeca ||
-                normalizar(p.marca) === normalizar(marcaPeca)
-            )
-            .map((p) => p.modelo)
-        ),
-      ].sort((a, b) =>
-        a.localeCompare(b, "pt-BR", { numeric: true })
-      ),
-    [pecas, marcaPeca]
+    () => opcoesUnicasPecas(
+      pecas
+        .filter((p) =>
+          (!tipoPeca || normalizar(p.tipo_peca) === normalizar(tipoPeca)) &&
+          (!marcaPeca || normalizar(p.marca) === normalizar(marcaPeca))
+        )
+        .map((p) => p.modelo)
+    ),
+    [pecas, tipoPeca, marcaPeca]
+  );
+
+  const qualidadesPecas = useMemo(
+    () => opcoesUnicasPecas(
+      pecas
+        .filter((p) =>
+          (!tipoPeca || normalizar(p.tipo_peca) === normalizar(tipoPeca)) &&
+          (!marcaPeca || normalizar(p.marca) === normalizar(marcaPeca)) &&
+          (!modeloPeca || normalizar(p.modelo) === normalizar(modeloPeca))
+        )
+        .map((p) => p.qualidade)
+    ),
+    [pecas, tipoPeca, marcaPeca, modeloPeca]
   );
 
   const resultadosPecas = useMemo(
-    () =>
-      pecas
-        .filter(
-          (p) =>
-            (!tipoPeca ||
-              normalizar(p.tipo_peca) === normalizar(tipoPeca)) &&
-            (!marcaPeca ||
-              normalizar(p.marca) === normalizar(marcaPeca)) &&
-            (!modeloPeca ||
-              normalizar(p.modelo) === normalizar(modeloPeca))
-        )
-        .sort(
-          (a, b) =>
-            Number(a.valor_final) - Number(b.valor_final)
-        ),
-    [pecas, tipoPeca, marcaPeca, modeloPeca]
+    () => pecas
+      .filter((p) =>
+        normalizar(p.tipo_peca) === normalizar(tipoPeca) &&
+        normalizar(p.marca) === normalizar(marcaPeca) &&
+        normalizar(p.modelo) === normalizar(modeloPeca) &&
+        (!qualidadePeca || normalizar(p.qualidade) === normalizar(qualidadePeca))
+      )
+      .sort((a, b) => Number(a.valor_final) - Number(b.valor_final)),
+    [pecas, tipoPeca, marcaPeca, modeloPeca, qualidadePeca]
   );
+
+  const podeExibirResultadosPecas =
+    Boolean(tipoPeca && marcaPeca && modeloPeca && pesquisouPecas);
 
   const listaPecas =
     secaoPecas === "todos"
       ? pecas
-      : pesquisouPecas
+      : secaoPecas === "consultar" && podeExibirResultadosPecas
       ? resultadosPecas
       : [];
 
@@ -3881,61 +3913,118 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
 
             {secaoPecas === "consultar" && (
               <section style={S.card}>
+                <p style={{ ...S.pequeno, marginTop: 0, marginBottom: 16 }}>
+                  Escolha o tipo de peça, a marca e o modelo. As opções vêm dos
+                  preços cadastrados e aparecem automaticamente, sem precisar digitar.
+                </p>
+
                 <Campo rotulo="Tipo de peça">
                   <select
                     style={S.input}
                     value={tipoPeca}
-                    onChange={(e) => setTipoPeca(e.target.value)}
+                    onChange={(e) => {
+                      setTipoPeca(e.target.value);
+                      setMarcaPeca("");
+                      setModeloPeca("");
+                      setQualidadePeca("");
+                      setPesquisouPecas(false);
+                      setPaginaPecas(1);
+                    }}
                   >
-                    <option value="">Todos os tipos</option>
-
-                    {TIPOS_PECAS.map((t) => (
-                      <option key={t}>{t}</option>
+                    <option value="">Selecione o tipo de peça</option>
+                    {tiposDisponiveisPecas.map((t) => (
+                      <option key={t} value={t}>{t}</option>
                     ))}
                   </select>
                 </Campo>
 
                 <Campo rotulo="Marca">
                   <select
-                    style={S.input}
+                    style={{ ...S.input, opacity: tipoPeca ? 1 : 0.6 }}
                     value={marcaPeca}
+                    disabled={!tipoPeca}
                     onChange={(e) => {
                       setMarcaPeca(e.target.value);
                       setModeloPeca("");
+                      setQualidadePeca("");
+                      setPesquisouPecas(false);
+                      setPaginaPecas(1);
                     }}
                   >
-                    <option value="">Todas as marcas</option>
-
-                    {MARCAS.map((m) => (
-                      <option key={m}>{m}</option>
+                    <option value="">Selecione a marca</option>
+                    {marcasDisponiveisPecas.map((m) => (
+                      <option key={m} value={m}>{m}</option>
                     ))}
                   </select>
                 </Campo>
 
-                <Campo rotulo="Modelo">
-                  <input
-                    style={S.input}
-                    list="modelos-pecas"
+                <Campo rotulo="Modelo do celular">
+                  <select
+                    style={{ ...S.input, opacity: marcaPeca ? 1 : 0.6 }}
                     value={modeloPeca}
-                    placeholder="Digite ou selecione o modelo"
-                    onChange={(e) => setModeloPeca(e.target.value)}
-                  />
-
-                  <datalist id="modelos-pecas">
+                    disabled={!tipoPeca || !marcaPeca}
+                    onChange={(e) => {
+                      const valor = e.target.value;
+                      setModeloPeca(valor);
+                      setQualidadePeca("");
+                      setPesquisouPecas(Boolean(valor));
+                      setPaginaPecas(1);
+                    }}
+                  >
+                    <option value="">Selecione o modelo</option>
                     {modelosPecas.map((m) => (
-                      <option key={m} value={m} />
+                      <option key={m} value={m}>{m}</option>
                     ))}
-                  </datalist>
+                  </select>
                 </Campo>
 
+                {modeloPeca && (
+                  <>
+                    <Campo rotulo="Qualidade da peça">
+                      <select
+                        style={S.input}
+                        value={qualidadePeca}
+                        onChange={(e) => {
+                          setQualidadePeca(e.target.value);
+                          setPaginaPecas(1);
+                        }}
+                      >
+                        <option value="">Todas as qualidades disponíveis</option>
+                        {qualidadesPecas.map((q) => (
+                          <option key={q} value={q}>{q}</option>
+                        ))}
+                      </select>
+                    </Campo>
+
+                    <div style={{
+                      background: "#111b28", border: "1px solid #303744",
+                      borderRadius: 12, padding: "12px 14px", marginTop: 4,
+                    }}>
+                      <strong style={{ color: LARANJA }}>
+                        {resultadosPecas.length} {resultadosPecas.length === 1 ? "peça encontrada" : "peças encontradas"}
+                      </strong>
+                      <p style={{ ...S.pequeno, marginBottom: 0, marginTop: 5 }}>
+                        {marcaPeca} {modeloPeca} — {tipoPeca}
+                        {qualidadePeca ? ` — ${qualidadePeca}` : ""}
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {!modeloPeca && (
+                  <p style={{ ...S.pequeno, textAlign: "center", marginBottom: 0 }}>
+                    {pecas.length === 0
+                      ? "Ainda não há preços de peças cadastrados."
+                      : "Selecione um modelo para visualizar as peças e os preços disponíveis."}
+                  </p>
+                )}
+
                 <Botao
-                  onClick={() => {
-                    setPesquisouPecas(true);
-                    setPaginaPecas(1);
-                  }}
-                  style={{ width: "100%" }}
+                  variante="secundario"
+                  onClick={() => void carregarPecas().catch((e) => alert(erroTexto(e)))}
+                  style={{ width: "100%", marginTop: 14 }}
                 >
-                  Buscar peças
+                  ↻ Atualizar lista de peças
                 </Botao>
               </section>
             )}
@@ -4074,7 +4163,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
 
             {secaoPecas !== "cadastrar" &&
               listaPecas.length === 0 &&
-              (secaoPecas === "todos" || pesquisouPecas) && (
+              (secaoPecas === "todos" || podeExibirResultadosPecas) && (
                 <p style={S.pequeno}>
                   Nenhuma peça encontrada.
                 </p>
