@@ -995,6 +995,8 @@ export default function App() {
   const [marcaFiltro, setMarcaFiltro] = useState("");
   const [marcaPeliculas, setMarcaPeliculas] = useState("Todas");
   const [tipoPeliculas, setTipoPeliculas] = useState("");
+  const [categoriaPedidoLista, setCategoriaPedidoLista] = useState<"Capas" | "Películas">("Películas");
+  const [tipoPedidoLista, setTipoPedidoLista] = useState("");
   const [busca, setBusca] = useState("");
   const [filtroAberto, setFiltroAberto] = useState(false);
 
@@ -1535,22 +1537,6 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
     );
   }, [produtos, variacoes, marcaPeliculas, tipoPeliculasAtivo]);
 
-  function enviarListaPeliculasWhatsApp() {
-    if (!tipoPeliculasAtivo || !linhasDePeliculas.length) return;
-    const linhas: string[] = [`*PELÍCULA ${tipoPeliculasAtivo.toUpperCase()}*`];
-    let marcaAtual = "";
-    for (const item of linhasDePeliculas) {
-      if (marcaAtual !== item.marca) {
-        marcaAtual = item.marca;
-        linhas.push("", `*${marcaAtual}*`);
-      }
-      const qtd = String(Math.max(0, Math.round(item.quantidade))).padStart(2, "0");
-      linhas.push(`${item.modelo} ${qtd}${item.quantidade <= 0 ? "🆘" : ""}`);
-    }
-    const texto = linhas.join("\n");
-    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank", "noopener,noreferrer");
-  }
-
   const variacoesProduto = variacoes.filter(
     (v) => v.produto_id === produtoAbertoId
   );
@@ -1587,6 +1573,34 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
 
   const manuaisPendentes = manuais.filter(m => m.status === "pendente");
   const manuaisFeitos = manuais.filter(m => m.status === "pedido_feito");
+  // A lista de envio reúne somente itens pendentes, inclusive pedidos manuais.
+  const tiposPedidoLista = Array.from(new Set([
+    ...tiposDePeliculas,
+    ...manuaisPendentes.filter(m => m.categoria === "Películas" && m.tipo?.trim()).map(m => tipoDaPelicula(m.tipo || "")),
+  ])).sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
+  const tipoPedidoAtivo = tiposPedidoLista.includes(tipoPedidoLista) ? tipoPedidoLista : (tiposPedidoLista[0] || "");
+  const itensListaPedido = [
+    ...pendentes.flatMap(v => {
+      const p = produtos.find(item => item.id === v.produto_id);
+      if (!p || p.categoria !== categoriaPedidoLista) return [];
+      if (p.categoria === "Películas" && tipoDaPelicula(v.nome) !== tipoPedidoAtivo) return [];
+      return [{ id: `v-${v.id}`, marca: p.marca, modelo: p.modelo, detalhe: p.categoria === "Capas" ? [v.nome, v.publico].filter(Boolean).join(" — ") : "", quantidade: Number(v.quantidade_comprar || 0) }];
+    }),
+    ...manuaisPendentes.filter(m => m.categoria === categoriaPedidoLista && (m.categoria !== "Películas" || tipoDaPelicula(m.tipo || "") === tipoPedidoAtivo))
+      .map(m => ({ id: `m-${m.id}`, marca: m.marca || "", modelo: m.modelo || m.nome_produto || "Item", detalhe: m.categoria === "Capas" ? [m.publico, m.tipo].filter(Boolean).join(" — ") : "", quantidade: Number(m.quantidade || 0) })),
+  ].sort((a, b) => a.marca.localeCompare(b.marca, "pt-BR") || a.modelo.localeCompare(b.modelo, "pt-BR", { numeric: true }));
+  function enviarListaPedidosWhatsApp() {
+    if (!itensListaPedido.length) return;
+    const titulo = categoriaPedidoLista === "Películas" ? `PELÍCULAS ${tipoPedidoAtivo}` : "CAPAS";
+    const linhas = [`*PEDIDO DE ${titulo.toUpperCase()}*`];
+    let marca = "";
+    for (const item of itensListaPedido) {
+      if (item.marca !== marca) { marca = item.marca; if (marca) linhas.push("", `*${marca}*`); }
+      linhas.push(`• ${item.modelo}${item.detalhe ? ` — ${item.detalhe}` : ""} — ${item.quantidade} un.`);
+    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(linhas.join("\n"))}`, "_blank", "noopener,noreferrer");
+  }
+
   const totalComprar = pedidos.reduce(
     (s, v) => s + Number(v.quantidade_comprar || 0), 0
   ) + manuais.filter(m => m.status !== "recebido")
@@ -2842,13 +2856,6 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                   <p style={{ color: "#aeb8c8", fontSize: 12, lineHeight: 1.5, margin: "8px 0 13px" }}>
                     Modelos organizados pela sequência da lista de lançamentos. Quantidades em estoque.
                   </p>
-                  <Botao
-                    disabled={!linhasDePeliculas.length}
-                    onClick={enviarListaPeliculasWhatsApp}
-                    style={{ width: "100%", background: "#168b50" }}
-                  >
-                    📲 Enviar lista pelo WhatsApp
-                  </Botao>
                 </section>
 
                 {funcionario && (
@@ -3830,6 +3837,26 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                 </Botao>
               </section>
             )}
+
+            <section style={S.card}>
+              <Campo rotulo="O que você vai pedir?">
+                <select style={S.input} value={categoriaPedidoLista} onChange={e => setCategoriaPedidoLista(e.target.value as "Capas" | "Películas")}>
+                  <option value="Películas">Películas</option><option value="Capas">Capas</option>
+                </select>
+              </Campo>
+              {categoriaPedidoLista === "Películas" && <Campo rotulo="Tipo de película">
+                <select style={S.input} value={tipoPedidoAtivo} onChange={e => setTipoPedidoLista(e.target.value)}>
+                  {!tiposPedidoLista.length && <option value="">Nenhum tipo cadastrado</option>}
+                  {tiposPedidoLista.map(tipo => <option key={tipo} value={tipo}>{tipo}</option>)}
+                </select>
+              </Campo>}
+              <strong>{categoriaPedidoLista === "Películas" ? `Películas ${tipoPedidoAtivo} para pedir` : "Capas para pedir"}</strong>
+              {!itensListaPedido.length && <p style={S.pequeno}>Nenhum item pendente para estes filtros.</p>}
+              {itensListaPedido.map(item => <div key={item.id} style={{display:"flex", justifyContent:"space-between", gap:10, padding:"10px 0", borderBottom:"1px solid #303744"}}>
+                <span>{item.marca} {item.modelo}{item.detalhe ? ` — ${item.detalhe}` : ""}</span><strong style={{color:LARANJA, whiteSpace:"nowrap"}}>{item.quantidade} un.</strong>
+              </div>)}
+              <Botao disabled={!itensListaPedido.length} onClick={enviarListaPedidosWhatsApp} style={{width:"100%", background:"#168b50", marginTop:14}}>📲 Enviar lista pelo WhatsApp</Botao>
+            </section>
 
             <section style={S.card}>
               <div
