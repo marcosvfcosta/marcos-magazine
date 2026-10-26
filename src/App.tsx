@@ -890,6 +890,85 @@ function FormularioEspecial({
   );
 }
 
+// Ordem de exibição definida pela lista enviada pela loja. Para modelos novos
+// ainda não mapeados, o comparador natural funciona como alternativa.
+const ORDEM_MARCAS_PELICULAS = ["Apple", "Samsung", "Xiaomi", "Realme", "Poco", "Motorola"];
+
+const ORDEM_MODELOS_PELICULAS: Record<string, string> = {
+  Apple: `7/8 branco|7/8 preto|7/8 plus branco|7/8 plus preto|xs|xs max/11pm|xr/11|12mini|12/12pro|12pro max|13mini|13/13pro/14|13 pro max|14 pro|14 pro max|15/15 pro|15 pro max|16|16 pro|16 pro max|17/17 pro|17 pm`,
+  Samsung: `a01core|a01|a02/a02s|a03/a03s|a04/a04s/a04e|a05|a05s|a06/a07|a06s|a10/a10s|a11|a12|a13|a14|a15|a16/a17|a20/30/50|a20s|a21s|a22 4g|a23|a24|a25|a26|a31|a32 4g/m22|a33|a34|a35|a36|a37|a51|a52|a53|a54|a55|a56|a70|a71|a72|a73|s20|s20fe|s21|s21 fe|s21 plus|s21 ultra|s22|s22 plus|s22ultra|s23|s23fe|s23 plus|s23 ultra|s24|s24 plus|s24 ultra|s24 fe|s25|s25 plus|s25 ultra|s26|s26 plus|s26 ultra`,
+  Xiaomi: `a1|a2|a3|note 7|mi 8 pro|redmi 8a|note 8|note 8t|note 8pro|mi 8 lite|redmi 9|9a/9c|note 9t|note 9|note 9s/pro|9 lite|10a|10c/12c|redmi 10|note 10|note 11|note 11 pro|redmi 12|note 12|note 12s|note 12 pro|redmi 13|redmi 13c|note 13|note 13 pro|14c|note 14|redmi 14|note 14 pro|rm 15|rm 15c|note 15|note 15 pro`,
+  Realme: `realme c51|realme c55|realme note 60/60x|realme c63/53|realme c65/c67/c75|realme c71|realme c85`,
+  Poco: `m3|m3 pro|x3/x3pro|c3|m4|m4 pro 4g|m4 pro 5g|x4 pro|x4 gt|f3|f4 gt|f5|m5|m5 pro|x5|x5 pro|m6 pro|x6/x6 pro|x7|x7 pro|pc f5 pro|x8 pro|x8 pro max`,
+  Motorola: `g05/g15|g5s plus|g5s|g6|g06|g6 plus|g7|g7 play|g7 power|g8|g8play|g8plus|g8power|g8 power lite|g9/g9 play|g9plus|g9power|g10/20/30|g10play|g10power|g13/g23/g53|g14|g15|g22/e32|g23|g24/g04|g31/41|g32|g34|g35|g42|g50|g51|g52/g82|g53|g54|g55|g56|g60|g60s|g62|g71|g71s|g72|g73|g75|g84|g86|g100|e5 play|e5plus|e6play|e6s|e6i|e6plus|e7/e7 power|e7 plus|e13|e20|e22|e32|e40|edge 30|edge 60`,
+};
+
+function chaveModeloPeliculas(nome: string): string {
+  return normalizar(nome)
+    .replace(/\b(iphone|galaxy|samsung|motorola|moto|xiaomi|realme|poco)\b/g, "")
+    .replace(/pro\s+max/g, "pm")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function marcaDaPelicula(produto: Produto): string {
+  const marca = normalizar(produto.marca);
+  if (marca.includes("apple") || marca.includes("iphone")) return "Apple";
+  if (marca.includes("samsung")) return "Samsung";
+  if (marca.includes("realme")) return "Realme";
+  if (marca.includes("motorola") || marca === "moto") return "Motorola";
+  if (marca.includes("poco")) return "Poco";
+  if (normalizar(produto.modelo).startsWith("poco ")) return "Poco";
+  if (marca.includes("xiaomi") || marca.includes("redmi")) return "Xiaomi";
+  return produto.marca.trim() || "Outros";
+}
+
+function tipoDaPelicula(nome: string): string {
+  const limpo = normalizar(nome).replace(/\s+/g, " ");
+  // Agrupa descrições equivalentes sem alterar nem excluir os cadastros do Supabase.
+  if (/^3\s*d/.test(limpo)) {
+    if (limpo.includes("priv")) return "3D Privativa";
+    if (limpo.includes("fosca")) return "3D Fosca";
+    return "3D";
+  }
+  if (/^9\s*d/.test(limpo)) {
+    if (limpo.includes("priv") && limpo.includes("fosc")) return "9D Fosca Privativa";
+    if (limpo.includes("priv")) return "9D Privativa";
+    if (limpo.includes("fosc")) return "9D Fosca";
+    return "9D";
+  }
+  if (limpo.includes("traseira")) return "Película Traseira";
+  return nome.trim() || "Sem tipo";
+}
+
+function compararMarcasPeliculas(a: string, b: string): number {
+  const ia = ORDEM_MARCAS_PELICULAS.indexOf(a);
+  const ib = ORDEM_MARCAS_PELICULAS.indexOf(b);
+  if (ia !== ib) return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+  return a.localeCompare(b, "pt-BR", { sensitivity: "base" });
+}
+
+function indiceLancamentoPeliculas(marca: string, modelo: string): number {
+  const chave = chaveModeloPeliculas(modelo);
+  const catalogo = (ORDEM_MODELOS_PELICULAS[marca] || "").split("|");
+  for (let i = 0; i < catalogo.length; i++) {
+    const entrada = catalogo[i];
+    // Também encontra iPhone 11 em XR/11 e iPhone 13 Pro em 13/13 Pro/14.
+    if (chaveModeloPeliculas(entrada) === chave ||
+        entrada.split("/").some(parte => chaveModeloPeliculas(parte) === chave)) return i;
+  }
+  // Modelos novos ficam após os da sequência cadastrada e usam ordem natural.
+  return 9999;
+}
+
+function compararLancamentoPeliculas(marca: string, a: string, b: string): number {
+  const ia = indiceLancamentoPeliculas(marca, a);
+  const ib = indiceLancamentoPeliculas(marca, b);
+  if (ia !== ib) return ia - ib;
+  return a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" });
+}
+
+type LinhaPelicula = { chave: string; modelo: string; marca: string; quantidade: number; produto: Produto };
+
 export default function App() {
   const [verificando, setVerificando] = useState(true);
   const [logado, setLogado] = useState(false);
@@ -914,6 +993,8 @@ export default function App() {
 
   const [categoria, setCategoria] = useState<Categoria>("Capas");
   const [marcaFiltro, setMarcaFiltro] = useState("");
+  const [marcaPeliculas, setMarcaPeliculas] = useState("Todas");
+  const [tipoPeliculas, setTipoPeliculas] = useState("");
   const [busca, setBusca] = useState("");
   const [filtroAberto, setFiltroAberto] = useState(false);
 
@@ -1413,6 +1494,62 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
         }),
     [produtos, categoria, marcaFiltro, busca]
   );
+
+  // Lista compacta de películas; a quantidade representa o estoque atual.
+  const tiposDePeliculas = useMemo(() => {
+    const ids = new Set(produtos.filter(p => p.ativo && p.categoria === "Películas").map(p => p.id));
+    const tipos = new Set(variacoes.filter(v => ids.has(v.produto_id)).map(v => tipoDaPelicula(v.nome)));
+    const preferencia = ["3D", "3D Privativa", "3D Fosca", "9D", "9D Fosca", "9D Privativa", "9D Fosca Privativa", "Película Traseira"];
+    return [...tipos].sort((a, b) => {
+      const ia = preferencia.indexOf(a), ib = preferencia.indexOf(b);
+      if (ia !== ib) return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+      return a.localeCompare(b, "pt-BR", { sensitivity: "base" });
+    });
+  }, [produtos, variacoes]);
+
+  const tipoPeliculasAtivo = tiposDePeliculas.includes(tipoPeliculas)
+    ? tipoPeliculas
+    : (tiposDePeliculas[0] || "");
+
+  const marcasDePeliculas = useMemo(() =>
+    [...new Set(produtos.filter(p => p.ativo && p.categoria === "Películas").map(marcaDaPelicula))]
+      .sort(compararMarcasPeliculas), [produtos]);
+
+  const linhasDePeliculas = useMemo(() => {
+    const resultado = new Map<string, LinhaPelicula>();
+    if (!tipoPeliculasAtivo) return [] as LinhaPelicula[];
+    for (const p of produtos) {
+      if (!p.ativo || p.categoria !== "Películas") continue;
+      const marca = marcaDaPelicula(p);
+      if (marcaPeliculas !== "Todas" && marcaPeliculas !== marca) continue;
+      for (const v of variacoes) {
+        if (v.produto_id !== p.id || tipoDaPelicula(v.nome) !== tipoPeliculasAtivo) continue;
+        const chave = `${marca}:${chaveModeloPeliculas(p.modelo)}`;
+        const existente = resultado.get(chave);
+        if (existente) existente.quantidade += Number(v.quantidade || 0);
+        else resultado.set(chave, { chave, marca, modelo: p.modelo.trim(), quantidade: Number(v.quantidade || 0), produto: p });
+      }
+    }
+    return [...resultado.values()].sort((a, b) =>
+      compararMarcasPeliculas(a.marca, b.marca) || compararLancamentoPeliculas(a.marca, a.modelo, b.modelo)
+    );
+  }, [produtos, variacoes, marcaPeliculas, tipoPeliculasAtivo]);
+
+  function enviarListaPeliculasWhatsApp() {
+    if (!tipoPeliculasAtivo || !linhasDePeliculas.length) return;
+    const linhas: string[] = [`*PELÍCULA ${tipoPeliculasAtivo.toUpperCase()}*`];
+    let marcaAtual = "";
+    for (const item of linhasDePeliculas) {
+      if (marcaAtual !== item.marca) {
+        marcaAtual = item.marca;
+        linhas.push("", `*${marcaAtual}*`);
+      }
+      const qtd = String(Math.max(0, Math.round(item.quantidade))).padStart(2, "0");
+      linhas.push(`${item.modelo} ${qtd}${item.quantidade <= 0 ? "🆘" : ""}`);
+    }
+    const texto = linhas.join("\n");
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank", "noopener,noreferrer");
+  }
 
   const variacoesProduto = variacoes.filter(
     (v) => v.produto_id === produtoAbertoId
@@ -2686,6 +2823,93 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
               })}
             </div>
 
+            {categoria === "Películas" ? (
+              <>
+                <h2 style={{ margin: "17px 0 12px", fontSize: 23 }}>Películas</h2>
+                <section style={S.card}>
+                  <Campo rotulo="1. Marca">
+                    <select style={S.input} value={marcaPeliculas} onChange={e => setMarcaPeliculas(e.target.value)}>
+                      <option value="Todas">Todas as marcas</option>
+                      {marcasDePeliculas.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </Campo>
+                  <Campo rotulo="2. Tipo de película">
+                    <select style={S.input} value={tipoPeliculasAtivo} onChange={e => setTipoPeliculas(e.target.value)}>
+                      {tiposDePeliculas.length === 0 && <option value="">Nenhum tipo cadastrado</option>}
+                      {tiposDePeliculas.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </Campo>
+                  <p style={{ color: "#aeb8c8", fontSize: 12, lineHeight: 1.5, margin: "8px 0 13px" }}>
+                    Modelos organizados pela sequência da lista de lançamentos. Quantidades em estoque.
+                  </p>
+                  <Botao
+                    disabled={!linhasDePeliculas.length}
+                    onClick={enviarListaPeliculasWhatsApp}
+                    style={{ width: "100%", background: "#168b50" }}
+                  >
+                    📲 Enviar lista pelo WhatsApp
+                  </Botao>
+                </section>
+
+                {funcionario && (
+                  <Botao
+                    variante="secundario"
+                    onClick={() => {
+                      if (mostrarProduto) limparProduto();
+                      else {
+                        setFormProduto(produtoVazio("Películas"));
+                        setEditandoProduto(null);
+                        setMostrarProduto(true);
+                      }
+                    }}
+                    style={{ width: "100%", marginBottom: 14 }}
+                  >
+                    {mostrarProduto ? "Fechar cadastro" : "+ Cadastrar modelo"}
+                  </Botao>
+                )}
+                {mostrarProduto && funcionario && (
+                  <FormularioProduto
+                    form={formProduto} setForm={setFormProduto}
+                    editando={!!editandoProduto} ocupado={ocupado} enviando={enviandoFoto}
+                    salvar={() => void salvarProduto()} cancelar={limparProduto}
+                    camera={() => escolherFoto("produto", "camera")}
+                    galeria={() => escolherFoto("produto", "galeria")}
+                  />
+                )}
+
+                <div style={{ ...S.linha, justifyContent: "space-between", margin: "12px 0" }}>
+                  <strong>{tipoPeliculasAtivo ? `Película ${tipoPeliculasAtivo}` : "Películas"}</strong>
+                  <span style={S.pequeno}>{linhasDePeliculas.length} modelos</span>
+                </div>
+                {linhasDePeliculas.length === 0 && (
+                  <section style={S.card}>Nenhum modelo cadastrado para estes filtros.</section>
+                )}
+                {linhasDePeliculas.map((item, index) => (
+                  <div
+                    key={item.chave}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      gap: 12, padding: "13px 12px", background: index % 2 === 0 ? "#111722" : "#151c27",
+                      borderBottom: "1px solid #303744", borderRadius: index === 0 ? "11px 11px 0 0" : 0,
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <strong style={{ fontSize: 15, display: "block", overflowWrap: "anywhere" }}>{item.modelo}</strong>
+                      {marcaPeliculas === "Todas" && <span style={{ color: "#aab4c1", fontSize: 11 }}>{item.marca}</span>}
+                    </div>
+                    <strong style={{ color: item.quantidade <= 0 ? "#ff7777" : LARANJA, fontSize: 17, whiteSpace: "nowrap" }}>
+                      {String(Math.max(0, Math.round(item.quantidade))).padStart(2, "0")}{item.quantidade <= 0 ? "🆘" : ""}
+                    </strong>
+                    <button type="button" onClick={() => abrirProduto(item.produto)}
+                      aria-label={`Ver ou editar ${item.modelo}`}
+                      style={{ ...S.secundario, minHeight: 35, padding: "6px 9px", fontSize: 11 }}>
+                      Editar
+                    </button>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <>
             <div
               style={{
                 display: "flex",
@@ -3033,6 +3257,8 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                 </section>
               );
             })}
+              </>
+            )}
           </>
         )}
 
