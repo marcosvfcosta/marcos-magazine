@@ -1028,6 +1028,8 @@ export default function App() {
   const [pesquisouPecas, setPesquisouPecas] = useState(false);
   const [paginaPecas, setPaginaPecas] = useState(1);
   const [pecaSelecionada, setPecaSelecionada] = useState<Peca | null>(null);
+  const [pecasComAro, setPecasComAro] = useState<Record<string, boolean>>({});
+  const [aroSelecionado, setAroSelecionado] = useState(false);
   const [clienteServico, setClienteServico] = useState("");
   const [servicoSolicitado, setServicoSolicitado] = useState("");
   const [observacoesServico, setObservacoesServico] = useState("");
@@ -1093,7 +1095,7 @@ export default function App() {
       if (erroAuth || !user) throw new Error("Faça login novamente.");
       const p = pecaSelecionada;
       const descricao = [
-        `${p.tipo_peca} - ${p.marca} ${p.modelo} - ${p.qualidade}`,
+        `${p.tipo_peca} - ${p.marca} ${p.modelo} - ${p.qualidade}${aroSelecionado ? " - Com aro" : ""} - ${dinheiro(Number(p.valor_final) + (aroSelecionado ? 20 : 0))}`,
         observacoesServico.trim(),
       ].filter(Boolean).join(" | ");
       const { error } = await supabase.from("solicitacoes_servico").insert({
@@ -4434,7 +4436,13 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
 
             {secaoPecas !== "cadastrar" &&
               pecasPagina.map((p) => (
-                <section key={p.id} style={S.card}>
+                <section key={p.id} style={{ ...S.card, position: "relative" }}>
+                  {padronizarTipoPeca(p.tipo_peca) === "Tela" && ["motorola", "samsung", "xiaomi", "realme"].includes(normalizar(p.marca)) && (
+                    <label style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 7, color: "#70dc99", fontWeight: 700, marginBottom: 8, minHeight: 36 }}>
+                      <input type="checkbox" checked={!!pecasComAro[p.id]} onChange={e => setPecasComAro(prev => ({ ...prev, [p.id]: e.target.checked }))} style={{ width: 20, height: 20, accentColor: "#20a660" }} />
+                      Com aro
+                    </label>
+                  )}
                   <strong>
                     {p.marca} {p.modelo}
                   </strong>
@@ -4451,13 +4459,14 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                       marginTop: 8,
                     }}
                   >
-                    {dinheiro(p.valor_final)}
+                    {dinheiro(Number(p.valor_final) + (pecasComAro[p.id] ? 20 : 0))}
                   </strong>
 
                   {funcionario && (
                     <Botao
                       onClick={() => {
                         setPecaSelecionada(p);
+                        setAroSelecionado(!!pecasComAro[p.id]);
                         setMensagemServico("");
                         setServicoSolicitado(p.tipo_peca === "Tela" ? "Troca de tela" : `Troca de ${p.tipo_peca.toLowerCase()}`);
                       }}
@@ -4502,7 +4511,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
               <section role="dialog" aria-modal="true" aria-label="Enviar peça para o técnico" onClick={(e) => e.stopPropagation()} style={{ ...S.card, borderColor: LARANJA, width: "100%", maxWidth: 510, maxHeight: "90dvh", overflowY: "auto", marginBottom: 0 }}>
                 <h3>Enviar peça para o técnico</h3>
                 <p style={S.pequeno}>
-                  Peça: {pecaSelecionada.tipo_peca} - {pecaSelecionada.marca} {pecaSelecionada.modelo} ({pecaSelecionada.qualidade})
+                  Peça: {pecaSelecionada.tipo_peca} - {pecaSelecionada.marca} {pecaSelecionada.modelo} ({pecaSelecionada.qualidade}) {aroSelecionado ? "— Com aro" : ""} — {dinheiro(Number(pecaSelecionada.valor_final) + (aroSelecionado ? 20 : 0))}
                 </p>
                 <Campo rotulo="Modelo do aparelho">
                   <input style={S.input} value={`${pecaSelecionada.marca} ${pecaSelecionada.modelo}`} readOnly />
