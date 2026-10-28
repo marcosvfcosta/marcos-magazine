@@ -967,7 +967,33 @@ function compararLancamentoPeliculas(marca: string, a: string, b: string): numbe
   return a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" });
 }
 
-type LinhaPelicula = { chave: string; modelo: string; marca: string; quantidade: number; produto: Produto };
+type LinhaPelicula = { chave: string; modelo: string; marca: string; quantidade: number; produto: Produto; semTipo?: boolean };
+
+// Modelos sem variações continuam acessíveis para concluir o cadastro.
+function montarLinhasPeliculas(produtos: Produto[], variacoes: Variacao[], marcaFiltro: string, tipoFiltro: string): LinhaPelicula[] {
+  const resultado = new Map<string, LinhaPelicula>();
+  for (const produto of produtos) {
+    if (!produto.ativo || produto.categoria !== "Películas") continue;
+    const marca = marcaDaPelicula(produto);
+    if (marcaFiltro !== "Todas" && marcaFiltro !== marca) continue;
+    const itens = variacoes.filter(v => v.produto_id === produto.id);
+    const correspondentes = itens.filter(v => tipoDaPelicula(v.nome) === tipoFiltro);
+    if (itens.length && !correspondentes.length) continue;
+    const chave = `${marca}:${chaveModeloPeliculas(produto.modelo)}`;
+    const quantidade = correspondentes.reduce((total, v) => total + Number(v.quantidade || 0), 0);
+    const existente = resultado.get(chave);
+    if (existente) {
+      existente.quantidade += quantidade;
+      if (correspondentes.length && existente.semTipo) {
+        existente.produto = produto;
+        existente.semTipo = false;
+      }
+    } else {
+      resultado.set(chave, { chave, marca, modelo: produto.modelo.trim(), quantidade, produto, semTipo: !itens.length });
+    }
+  }
+  return [...resultado.values()].sort((a, b) => compararMarcasPeliculas(a.marca, b.marca) || compararLancamentoPeliculas(a.marca, a.modelo, b.modelo));
+}
 
 export default function App() {
   const [verificando, setVerificando] = useState(true);
@@ -995,6 +1021,10 @@ export default function App() {
   const [marcaFiltro, setMarcaFiltro] = useState("");
   const [marcaPeliculas, setMarcaPeliculas] = useState("Todas");
   const [tipoPeliculas, setTipoPeliculas] = useState("");
+  const [mostrarCadastroPelicula, setMostrarCadastroPelicula] = useState(false);
+  const [formPelicula, setFormPelicula] = useState({ marca: "", modelo: "", tipo: "", quantidade: "0" });
+  const [produtoPeliculaId, setProdutoPeliculaId] = useState<string | null>(null);
+  const salvandoPelicula = useRef(false);
   const [categoriaPedidoLista, setCategoriaPedidoLista] = useState<"Capas" | "Películas">("Películas");
   const [tipoPedidoLista, setTipoPedidoLista] = useState("");
   const [busca, setBusca] = useState("");
@@ -1519,25 +1549,10 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
     [...new Set(produtos.filter(p => p.ativo && p.categoria === "Películas").map(marcaDaPelicula))]
       .sort(compararMarcasPeliculas), [produtos]);
 
-  const linhasDePeliculas = useMemo(() => {
-    const resultado = new Map<string, LinhaPelicula>();
-    if (!tipoPeliculasAtivo) return [] as LinhaPelicula[];
-    for (const p of produtos) {
-      if (!p.ativo || p.categoria !== "Películas") continue;
-      const marca = marcaDaPelicula(p);
-      if (marcaPeliculas !== "Todas" && marcaPeliculas !== marca) continue;
-      for (const v of variacoes) {
-        if (v.produto_id !== p.id || tipoDaPelicula(v.nome) !== tipoPeliculasAtivo) continue;
-        const chave = `${marca}:${chaveModeloPeliculas(p.modelo)}`;
-        const existente = resultado.get(chave);
-        if (existente) existente.quantidade += Number(v.quantidade || 0);
-        else resultado.set(chave, { chave, marca, modelo: p.modelo.trim(), quantidade: Number(v.quantidade || 0), produto: p });
-      }
-    }
-    return [...resultado.values()].sort((a, b) =>
-      compararMarcasPeliculas(a.marca, b.marca) || compararLancamentoPeliculas(a.marca, a.modelo, b.modelo)
-    );
-  }, [produtos, variacoes, marcaPeliculas, tipoPeliculasAtivo]);
+  const linhasDePeliculas = useMemo(
+    () => montarLinhasPeliculas(produtos, variacoes, marcaPeliculas, tipoPeliculasAtivo),
+    [produtos, variacoes, marcaPeliculas, tipoPeliculasAtivo]
+  );
 
   const variacoesProduto = variacoes.filter(
     (v) => v.produto_id === produtoAbertoId
@@ -1636,6 +1651,75 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
     window.scrollTo(0, 0);
   }
 
+  function abrirCadastroPelicula(produto?: Produto) {
+    const tipo = tipoPeliculasAtivo || "3D";
+    const item = produto ? variacoes.find(v => v.produto_id === produto.id && tipoDaPelicula(v.nome) === tipo) : null;
+    setProdutoPeliculaId(produto?.id || null);
+    setFormPelicula({
+      marca: produto?.marca || (marcaPeliculas !== "Todas" ? marcaPeliculas : ""),
+      modelo: produto?.modelo || "",
+      tipo,
+      quantidade: String(item?.quantidade ?? 0),
+    });
+    setMostrarCadastroPelicula(true);
+    window.scrollTo(0, 0);
+  }
+
+  async function salvarPeliculaCompleta() {
+    if (!funcionario || ocupado || salvandoPelicula.current) return;
+    const quantidade = inteiro(formPelicula.quantidade);
+    if (!formPelicula.marca.trim() || !formPelicula.modelo.trim() || !formPelicula.tipo.trim()) {
+      alert("Informe marca, modelo e tipo de película.");
+      return;
+    }
+    if (quantidade === null) {
+      alert("Informe uma quantidade inteira igual ou maior que zero.");
+      return;
+    }
+    salvandoPelicula.current = true;
+    setOcupado(true);
+    try {
+      let produto = produtos.find(p => p.ativo && p.categoria === "Películas" &&
+        (produtoPeliculaId ? p.id === produtoPeliculaId :
+          normalizar(p.marca) === normalizar(formPelicula.marca) && chaveModeloPeliculas(p.modelo) === chaveModeloPeliculas(formPelicula.modelo)));
+      if (!produto) {
+        const { data, error } = await supabase.from("estoque_produtos").insert({
+          categoria: "Películas", marca: formPelicula.marca.trim(), modelo: formPelicula.modelo.trim(), ativo: true, imagem_url: null,
+        }).select("*");
+        if (error) throw error;
+        if (!data?.length) throw new Error("Não foi possível salvar o modelo. Confira sua permissão de cadastro.");
+        produto = data[0] as Produto;
+        const salvo = produto;
+        setProdutos(atuais => [...atuais.filter(p => p.id !== salvo.id), salvo]);
+        // Se a próxima etapa falhar, a tentativa seguinte reutiliza este modelo.
+        setProdutoPeliculaId(produto.id);
+      }
+      const tipo = tipoDaPelicula(formPelicula.tipo.trim());
+      const produtoId = produto.id;
+      const existente = variacoes.find(v => v.produto_id === produtoId && tipoDaPelicula(v.nome) === tipo);
+      const resposta = existente
+        ? await supabase.from("estoque_variacoes").update({ quantidade, updated_at: new Date().toISOString() }).eq("id", existente.id).select("*")
+        : await supabase.from("estoque_variacoes").insert({
+            produto_id: produto.id, nome: tipo, publico: "Unissex", quantidade,
+            quantidade_comprar: 0, status_pedido: "pendente", imagem_url: null, updated_at: new Date().toISOString(),
+          }).select("*");
+      if (resposta.error) throw resposta.error;
+      if (!resposta.data?.length) throw new Error("Não foi possível salvar a película. Confira sua permissão de cadastro.");
+      const salva = resposta.data[0] as Variacao;
+      setVariacoes(atuais => [...atuais.filter(v => v.id !== salva.id), salva]);
+      setMarcaPeliculas(marcaDaPelicula(produto));
+      setTipoPeliculas(tipo);
+      setMostrarCadastroPelicula(false);
+      setProdutoPeliculaId(null);
+      alert("Película salva!");
+    } catch (erro) {
+      alert("Não foi possível concluir o cadastro: " + erroTexto(erro));
+    } finally {
+      salvandoPelicula.current = false;
+      setOcupado(false);
+    }
+  }
+
   async function salvarProduto() {
     if (!funcionario || ocupado || enviandoFoto) return;
 
@@ -1644,6 +1728,15 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
       return;
     }
 
+    if (!editandoProduto && formProduto.categoria === "Películas") {
+      const existente = produtos.find(p => p.ativo && p.categoria === "Películas" && normalizar(p.marca) === normalizar(formProduto.marca) && chaveModeloPeliculas(p.modelo) === chaveModeloPeliculas(formProduto.modelo));
+      if (existente) {
+        abrirProduto(existente);
+        setFormVariacao({ ...variacaoVazia(), nome: tipoPeliculasAtivo });
+        setMostrarVariacao(true);
+        return;
+      }
+    }
     setOcupado(true);
 
     try {
@@ -1662,22 +1755,30 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
             .from("estoque_produtos")
             .update(dados)
             .eq("id", editandoProduto)
-            .select("id")
+            .select("*")
         : await supabase
             .from("estoque_produtos")
-            .insert(dados)
-            .select("id");
+            .insert({ ...dados, ativo: true })
+            .select("*");
 
       if (resposta.error) throw resposta.error;
       if (!resposta.data?.length) {
         throw new Error("Gravação não autorizada.");
       }
 
+      const salvo = resposta.data[0] as Produto;
+      setProdutos(atuais => [...atuais.filter(p => p.id !== salvo.id), salvo]);
       setCategoria(dados.categoria);
       limparProduto();
-      await carregarEstoque();
-
-      alert("Modelo salvo!");
+      if (dados.categoria === "Películas") {
+        setMarcaPeliculas(marcaDaPelicula(salvo));
+        abrirProduto(salvo);
+        setFormVariacao({ ...variacaoVazia(), nome: tipoPeliculasAtivo });
+        setMostrarVariacao(true);
+        alert("Modelo salvo! Agora informe o tipo de película e a quantidade e toque em Salvar item.");
+      } else {
+        alert("Modelo salvo!");
+      }
     } catch (erro) {
       alert(erroTexto(erro));
     } finally {
@@ -1785,6 +1886,10 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
         throw new Error("Gravação não autorizada.");
       }
 
+      if (produtoAberto.categoria === "Películas") {
+        setTipoPeliculas(tipoDaPelicula(dados.nome));
+        setMarcaPeliculas(marcaDaPelicula(produtoAberto));
+      }
       limparVariacao();
       setRascunhos({});
       await carregarEstoque();
@@ -2855,35 +2960,47 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                       {tiposDePeliculas.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </Campo>
-                  <p style={{ color: "#aeb8c8", fontSize: 12, lineHeight: 1.5, margin: "8px 0 13px" }}>
-                    Modelos organizados pela sequência da lista de lançamentos. Quantidades em estoque.
-                  </p>
                 </section>
 
-                {funcionario && (
-                  <Botao
-                    variante="secundario"
-                    onClick={() => {
-                      if (mostrarProduto) limparProduto();
-                      else {
-                        setFormProduto(produtoVazio("Películas"));
-                        setEditandoProduto(null);
-                        setMostrarProduto(true);
-                      }
-                    }}
-                    style={{ width: "100%", marginBottom: 14 }}
-                  >
-                    {mostrarProduto ? "Fechar cadastro" : "+ Cadastrar modelo"}
+                {funcionario && !mostrarCadastroPelicula && (
+                  <Botao variante="secundario" onClick={() => abrirCadastroPelicula()} style={{ width: "100%", marginBottom: 14 }}>
+                    + Cadastrar película
                   </Botao>
                 )}
-                {mostrarProduto && funcionario && (
-                  <FormularioProduto
-                    form={formProduto} setForm={setFormProduto}
-                    editando={!!editandoProduto} ocupado={ocupado} enviando={enviandoFoto}
-                    salvar={() => void salvarProduto()} cancelar={limparProduto}
-                    camera={() => escolherFoto("produto", "camera")}
-                    galeria={() => escolherFoto("produto", "galeria")}
-                  />
+                {funcionario && mostrarCadastroPelicula && (
+                  <section style={S.card}>
+                    <h3 style={{ marginTop: 0 }}>{produtoPeliculaId ? "Editar película" : "Cadastrar película"}</h3>
+                    <Campo rotulo="Marca">
+                      <select style={S.input} disabled={ocupado || !!produtoPeliculaId} value={formPelicula.marca} onChange={e => setFormPelicula(f => ({ ...f, marca: e.target.value, modelo: "" }))}>
+                        <option value="">Selecione</option>
+                        {Array.from(new Set([...MARCAS, "Poco", ...marcasDePeliculas, ...(formPelicula.marca ? [formPelicula.marca] : [])])).map(m => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </Campo>
+                    <Campo rotulo="Modelo">
+                      <input style={S.input} disabled={ocupado} readOnly={!!produtoPeliculaId} value={formPelicula.modelo} list="modelos-cadastro-pelicula" placeholder="Ex.: Note 17" onChange={e => setFormPelicula(f => ({ ...f, modelo: e.target.value }))} />
+                      <datalist id="modelos-cadastro-pelicula">
+                        {produtos.filter(p => p.ativo && p.categoria === "Películas" && normalizar(p.marca) === normalizar(formPelicula.marca)).map(p => <option key={p.id} value={p.modelo} />)}
+                      </datalist>
+                    </Campo>
+                    <Campo rotulo="Tipo de película">
+                      <input style={S.input} disabled={ocupado} value={formPelicula.tipo} list="tipos-cadastro-pelicula" placeholder="Ex.: 3D, 9D, Privativa" onChange={e => {
+                        const tipo = e.target.value;
+                        const p = produtos.find(p => p.id === produtoPeliculaId);
+                        const v = p ? variacoes.find(v => v.produto_id === p.id && tipoDaPelicula(v.nome) === tipoDaPelicula(tipo)) : null;
+                        setFormPelicula(f => ({ ...f, tipo, ...(p ? { quantidade: String(v?.quantidade ?? 0) } : {}) }));
+                      }} />
+                      <datalist id="tipos-cadastro-pelicula">
+                        {Array.from(new Set(["3D", "9D", ...tiposDePeliculas])).map(t => <option key={t} value={t} />)}
+                      </datalist>
+                    </Campo>
+                    <Campo rotulo="Quantidade em estoque">
+                      <input style={S.input} disabled={ocupado} type="number" min="0" step="1" value={formPelicula.quantidade} onChange={e => setFormPelicula(f => ({ ...f, quantidade: e.target.value }))} />
+                    </Campo>
+                    <Botao disabled={ocupado} onClick={() => void salvarPeliculaCompleta()} style={{ width: "100%" }}>
+                      {ocupado ? "Salvando..." : "Salvar película"}
+                    </Botao>
+                    <Botao variante="secundario" disabled={ocupado} onClick={() => setMostrarCadastroPelicula(false)} style={{ width: "100%", marginTop: 8 }}>Cancelar</Botao>
+                  </section>
                 )}
 
                 <div style={{ ...S.linha, justifyContent: "space-between", margin: "12px 0" }}>
@@ -2905,14 +3022,15 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <strong style={{ fontSize: 15, display: "block", overflowWrap: "anywhere" }}>{item.modelo}</strong>
                       {marcaPeliculas === "Todas" && <span style={{ color: "#aab4c1", fontSize: 11 }}>{item.marca}</span>}
+                      {item.semTipo && <span style={{ display: "block", color: "#f0bf74", fontSize: 12 }}>Falta cadastrar tipo e quantidade</span>}
                     </div>
                     <strong style={{ color: item.quantidade <= 0 ? "#ff7777" : LARANJA, fontSize: 17, whiteSpace: "nowrap" }}>
-                      {String(Math.max(0, Math.round(item.quantidade))).padStart(2, "0")}{item.quantidade <= 0 ? "🆘" : ""}
+                      {item.semTipo ? "—" : `${String(Math.max(0, Math.round(item.quantidade))).padStart(2, "0")}${item.quantidade <= 0 ? "🆘" : ""}`}
                     </strong>
-                    <button type="button" onClick={() => abrirProduto(item.produto)}
+                    <button type="button" disabled={ocupado} onClick={() => abrirCadastroPelicula(item.produto)}
                       aria-label={`Ver ou editar ${item.modelo}`}
                       style={{ ...S.secundario, minHeight: 35, padding: "6px 9px", fontSize: 11 }}>
-                      Editar
+                      {item.semTipo ? "Completar" : "Editar"}
                     </button>
                   </div>
                 ))}
@@ -3729,7 +3847,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                     if (mostrarVariacao) {
                       limparVariacao();
                     } else {
-                      setFormVariacao(variacaoVazia());
+                      setFormVariacao({ ...variacaoVazia(), nome: produtoAberto.categoria === "Películas" ? tipoPeliculasAtivo : "" });
                       setEditandoVariacao(null);
                       setMostrarVariacao(true);
                     }
@@ -3741,7 +3859,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                 >
                   {mostrarVariacao
                     ? "Fechar cadastro"
-                    : "+ Adicionar capinha / item"}
+                    : produtoAberto.categoria === "Películas" ? "+ Adicionar tipo de película" : "+ Adicionar capinha / item"}
                 </Botao>
 
                 {mostrarVariacao && (
