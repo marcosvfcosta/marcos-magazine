@@ -3019,10 +3019,13 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                           </div>
                         )}
                         <Campo rotulo="Tipo de película">
-                          <input style={S.input} disabled={ocupado} value={item.tipo} list="tipos-cadastro-pelicula" placeholder="Ex.: 3D, 9D, Privativa" onChange={e => {
+                          <select style={S.input} disabled={ocupado} value={item.tipo} onChange={e => {
                             const tipo = e.target.value;
                             setFormPelicula(f => ({ ...f, itens: f.itens.map((linha, i) => i === indice ? { ...linha, tipo } : linha) }));
-                          }} />
+                          }}>
+                            <option value="">Selecione o tipo</option>
+                            {Array.from(new Set([...tiposDePeliculas, ...formPelicula.itens.map(linha => linha.tipo).filter(Boolean)])).map(tipo => <option key={tipo} value={tipo}>{tipo}</option>)}
+                          </select>
                         </Campo>
                         <Campo rotulo="Quantidade em estoque">
                           <input style={S.input} disabled={ocupado} type="number" min="0" step="1" value={item.quantidade} onChange={e => {
