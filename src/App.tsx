@@ -1022,7 +1022,9 @@ export default function App() {
   const [marcaPeliculas, setMarcaPeliculas] = useState("Todas");
   const [tipoPeliculas, setTipoPeliculas] = useState("");
   const [mostrarCadastroPelicula, setMostrarCadastroPelicula] = useState(false);
-  const [formPelicula, setFormPelicula] = useState({ marca: "", modelo: "", tipo: "", quantidade: "0" });
+  const [formPelicula, setFormPelicula] = useState<{ marca: string; modelo: string; itens: { tipo: string; quantidade: string }[] }>({
+    marca: "", modelo: "", itens: [{ tipo: "", quantidade: "0" }],
+  });
   const [produtoPeliculaId, setProdutoPeliculaId] = useState<string | null>(null);
   const salvandoPelicula = useRef(false);
   const [categoriaPedidoLista, setCategoriaPedidoLista] = useState<"Capas" | "Películas">("Películas");
@@ -1653,13 +1655,14 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
 
   function abrirCadastroPelicula(produto?: Produto) {
     const tipo = tipoPeliculasAtivo || "3D";
-    const item = produto ? variacoes.find(v => v.produto_id === produto.id && tipoDaPelicula(v.nome) === tipo) : null;
+    const cadastradas = produto ? variacoes.filter(v => v.produto_id === produto.id) : [];
     setProdutoPeliculaId(produto?.id || null);
     setFormPelicula({
       marca: produto?.marca || (marcaPeliculas !== "Todas" ? marcaPeliculas : ""),
       modelo: produto?.modelo || "",
-      tipo,
-      quantidade: String(item?.quantidade ?? 0),
+      itens: cadastradas.length
+        ? cadastradas.map(v => ({ tipo: tipoDaPelicula(v.nome), quantidade: String(v.quantidade ?? 0) }))
+        : [{ tipo, quantidade: "0" }],
     });
     setMostrarCadastroPelicula(true);
     window.scrollTo(0, 0);
@@ -1667,17 +1670,26 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
 
   async function salvarPeliculaCompleta() {
     if (!funcionario || ocupado || salvandoPelicula.current) return;
-    const quantidade = inteiro(formPelicula.quantidade);
-    if (!formPelicula.marca.trim() || !formPelicula.modelo.trim() || !formPelicula.tipo.trim()) {
-      alert("Informe marca, modelo e tipo de película.");
+    if (!formPelicula.marca.trim() || !formPelicula.modelo.trim()) {
+      alert("Informe a marca e o modelo.");
       return;
     }
-    if (quantidade === null) {
-      alert("Informe uma quantidade inteira igual ou maior que zero.");
+    const itens = formPelicula.itens.map(item => ({ tipo: tipoDaPelicula(item.tipo.trim()), quantidade: inteiro(item.quantidade) }));
+    if (!itens.length || formPelicula.itens.some(item => !item.tipo.trim())) {
+      alert("Informe o tipo de película em todas as linhas.");
+      return;
+    }
+    if (itens.some(item => item.quantidade === null)) {
+      alert("Informe quantidades inteiras iguais ou maiores que zero.");
+      return;
+    }
+    if (new Set(itens.map(item => normalizar(item.tipo))).size !== itens.length) {
+      alert("Há tipos repetidos. Use uma linha para cada tipo de película.");
       return;
     }
     salvandoPelicula.current = true;
     setOcupado(true);
+    let salvos = 0;
     try {
       let produto = produtos.find(p => p.ativo && p.categoria === "Películas" &&
         (produtoPeliculaId ? p.id === produtoPeliculaId :
@@ -1691,29 +1703,45 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
         produto = data[0] as Produto;
         const salvo = produto;
         setProdutos(atuais => [...atuais.filter(p => p.id !== salvo.id), salvo]);
-        // Se a próxima etapa falhar, a tentativa seguinte reutiliza este modelo.
         setProdutoPeliculaId(produto.id);
       }
-      const tipo = tipoDaPelicula(formPelicula.tipo.trim());
       const produtoId = produto.id;
-      const existente = variacoes.find(v => v.produto_id === produtoId && tipoDaPelicula(v.nome) === tipo);
-      const resposta = existente
-        ? await supabase.from("estoque_variacoes").update({ quantidade, updated_at: new Date().toISOString() }).eq("id", existente.id).select("*")
-        : await supabase.from("estoque_variacoes").insert({
-            produto_id: produto.id, nome: tipo, publico: "Unissex", quantidade,
-            quantidade_comprar: 0, status_pedido: "pendente", imagem_url: null, updated_at: new Date().toISOString(),
-          }).select("*");
-      if (resposta.error) throw resposta.error;
-      if (!resposta.data?.length) throw new Error("Não foi possível salvar a película. Confira sua permissão de cadastro.");
-      const salva = resposta.data[0] as Variacao;
-      setVariacoes(atuais => [...atuais.filter(v => v.id !== salva.id), salva]);
+      // Consulta atual permite retomar uma tentativa interrompida sem repetir tipos.
+      const consulta = await supabase.from("estoque_variacoes").select("*").eq("produto_id", produtoId);
+      if (consulta.error) throw consulta.error;
+      const cadastradas = (consulta.data || []) as Variacao[];
+      const novas: { produto_id: string; nome: string; publico: Publico; quantidade: number; quantidade_comprar: number; status_pedido: string; imagem_url: null; updated_at: string }[] = [];
+      for (const item of itens) {
+        const existente = cadastradas.find(v => normalizar(tipoDaPelicula(v.nome)) === normalizar(item.tipo));
+        if (existente) {
+          // Altera apenas o estoque; mantém pedidos e demais dados desta variação.
+          const resposta = await supabase.from("estoque_variacoes").update({ quantidade: item.quantidade!, updated_at: new Date().toISOString() }).eq("id", existente.id).select("*");
+          if (resposta.error) throw resposta.error;
+          if (!resposta.data?.length) throw new Error(`Não foi possível salvar ${item.tipo}.`);
+          const salva = resposta.data[0] as Variacao;
+          setVariacoes(atuais => [...atuais.filter(v => v.id !== salva.id), salva]);
+          salvos++;
+        } else {
+          novas.push({ produto_id: produtoId, nome: item.tipo, publico: "Unissex", quantidade: item.quantidade!, quantidade_comprar: 0, status_pedido: "pendente", imagem_url: null, updated_at: new Date().toISOString() });
+        }
+      }
+      if (novas.length) {
+        const resposta = await supabase.from("estoque_variacoes").insert(novas).select("*");
+        if (resposta.error) throw resposta.error;
+        if (!resposta.data || resposta.data.length !== novas.length) throw new Error("Não foi possível confirmar todos os tipos. Tente salvar novamente.");
+        const novasSalvas = resposta.data as Variacao[];
+        const ids = new Set(novasSalvas.map(v => v.id));
+        setVariacoes(atuais => [...atuais.filter(v => !ids.has(v.id)), ...novasSalvas]);
+        salvos += novasSalvas.length;
+      }
       setMarcaPeliculas(marcaDaPelicula(produto));
-      setTipoPeliculas(tipo);
+      const primeira = cadastradas.find(v => normalizar(tipoDaPelicula(v.nome)) === normalizar(itens[0].tipo));
+      setTipoPeliculas(primeira ? tipoDaPelicula(primeira.nome) : itens[0].tipo);
       setMostrarCadastroPelicula(false);
       setProdutoPeliculaId(null);
-      alert("Película salva!");
+      alert(`${salvos} tipo(s) de película salvo(s)!`);
     } catch (erro) {
-      alert("Não foi possível concluir o cadastro: " + erroTexto(erro));
+      alert((salvos ? "Alguns tipos foram salvos. Mantenha o formulário e toque em salvar novamente para concluir. " : "Não foi possível concluir o cadastro. ") + erroTexto(erro));
     } finally {
       salvandoPelicula.current = false;
       setOcupado(false);
@@ -2969,7 +2997,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                 )}
                 {funcionario && mostrarCadastroPelicula && (
                   <section style={S.card}>
-                    <h3 style={{ marginTop: 0 }}>{produtoPeliculaId ? "Editar película" : "Cadastrar película"}</h3>
+                    <h3 style={{ marginTop: 0 }}>{produtoPeliculaId ? "Editar películas" : "Cadastrar películas"}</h3>
                     <Campo rotulo="Marca">
                       <select style={S.input} disabled={ocupado || !!produtoPeliculaId} value={formPelicula.marca} onChange={e => setFormPelicula(f => ({ ...f, marca: e.target.value, modelo: "" }))}>
                         <option value="">Selecione</option>
@@ -2982,22 +3010,36 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
                         {produtos.filter(p => p.ativo && p.categoria === "Películas" && normalizar(p.marca) === normalizar(formPelicula.marca)).map(p => <option key={p.id} value={p.modelo} />)}
                       </datalist>
                     </Campo>
-                    <Campo rotulo="Tipo de película">
-                      <input style={S.input} disabled={ocupado} value={formPelicula.tipo} list="tipos-cadastro-pelicula" placeholder="Ex.: 3D, 9D, Privativa" onChange={e => {
-                        const tipo = e.target.value;
-                        const p = produtos.find(p => p.id === produtoPeliculaId);
-                        const v = p ? variacoes.find(v => v.produto_id === p.id && tipoDaPelicula(v.nome) === tipoDaPelicula(tipo)) : null;
-                        setFormPelicula(f => ({ ...f, tipo, ...(p ? { quantidade: String(v?.quantidade ?? 0) } : {}) }));
-                      }} />
-                      <datalist id="tipos-cadastro-pelicula">
-                        {Array.from(new Set(["3D", "9D", ...tiposDePeliculas])).map(t => <option key={t} value={t} />)}
-                      </datalist>
-                    </Campo>
-                    <Campo rotulo="Quantidade em estoque">
-                      <input style={S.input} disabled={ocupado} type="number" min="0" step="1" value={formPelicula.quantidade} onChange={e => setFormPelicula(f => ({ ...f, quantidade: e.target.value }))} />
-                    </Campo>
+                    {formPelicula.itens.map((item, indice) => (
+                      <div key={indice} style={{ borderTop: "1px solid #303744", paddingTop: 12, marginTop: 4 }}>
+                        {formPelicula.itens.length > 1 && (
+                          <div style={{ ...S.linha, justifyContent: "space-between", marginBottom: 8 }}>
+                            <span style={S.pequeno}>Tipo {indice + 1}</span>
+                            <button type="button" aria-label={`Remover linha ${indice + 1} do formulário`} disabled={ocupado} onClick={() => setFormPelicula(f => ({ ...f, itens: f.itens.filter((_, i) => i !== indice) }))} style={{ ...S.secundario, minHeight: 40, padding: "8px 10px", fontSize: 12 }}>Remover linha</button>
+                          </div>
+                        )}
+                        <Campo rotulo="Tipo de película">
+                          <input style={S.input} disabled={ocupado} value={item.tipo} list="tipos-cadastro-pelicula" placeholder="Ex.: 3D, 9D, Privativa" onChange={e => {
+                            const tipo = e.target.value;
+                            setFormPelicula(f => ({ ...f, itens: f.itens.map((linha, i) => i === indice ? { ...linha, tipo } : linha) }));
+                          }} />
+                        </Campo>
+                        <Campo rotulo="Quantidade em estoque">
+                          <input style={S.input} disabled={ocupado} type="number" min="0" step="1" value={item.quantidade} onChange={e => {
+                            const quantidade = e.target.value;
+                            setFormPelicula(f => ({ ...f, itens: f.itens.map((linha, i) => i === indice ? { ...linha, quantidade } : linha) }));
+                          }} />
+                        </Campo>
+                      </div>
+                    ))}
+                    <datalist id="tipos-cadastro-pelicula">
+                      {Array.from(new Set(["3D", "9D", ...tiposDePeliculas])).map(t => <option key={t} value={t} />)}
+                    </datalist>
+                    <Botao variante="secundario" disabled={ocupado} onClick={() => setFormPelicula(f => ({ ...f, itens: [...f.itens, { tipo: "", quantidade: "0" }] }))} style={{ width: "100%", marginBottom: 12, color: LARANJA }}>
+                      + Tipo de película e quantidade
+                    </Botao>
                     <Botao disabled={ocupado} onClick={() => void salvarPeliculaCompleta()} style={{ width: "100%" }}>
-                      {ocupado ? "Salvando..." : "Salvar película"}
+                      {ocupado ? "Salvando..." : "Salvar todas as películas"}
                     </Botao>
                     <Botao variante="secundario" disabled={ocupado} onClick={() => setMostrarCadastroPelicula(false)} style={{ width: "100%", marginTop: 8 }}>Cancelar</Botao>
                   </section>
