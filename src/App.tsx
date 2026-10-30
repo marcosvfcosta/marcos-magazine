@@ -1021,6 +1021,7 @@ export default function App() {
   const [marcaFiltro, setMarcaFiltro] = useState("");
   const [marcaPeliculas, setMarcaPeliculas] = useState("Todas");
   const [tipoPeliculas, setTipoPeliculas] = useState("");
+  const [buscaPeliculas, setBuscaPeliculas] = useState("");
   const [mostrarCadastroPelicula, setMostrarCadastroPelicula] = useState(false);
   const [formPelicula, setFormPelicula] = useState<{ marca: string; modelo: string; itens: { tipo: string; quantidade: string }[] }>({
     marca: "", modelo: "", itens: [{ tipo: "", quantidade: "0" }],
@@ -1552,8 +1553,9 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
       .sort(compararMarcasPeliculas), [produtos]);
 
   const linhasDePeliculas = useMemo(
-    () => montarLinhasPeliculas(produtos, variacoes, marcaPeliculas, tipoPeliculasAtivo),
-    [produtos, variacoes, marcaPeliculas, tipoPeliculasAtivo]
+    () => montarLinhasPeliculas(produtos, variacoes, marcaPeliculas, tipoPeliculasAtivo)
+      .filter(item => normalizar(`${item.marca} ${item.modelo}`).replace(/[^a-z0-9]/g, "").includes(normalizar(buscaPeliculas).replace(/[^a-z0-9]/g, ""))),
+    [produtos, variacoes, marcaPeliculas, tipoPeliculasAtivo, buscaPeliculas]
   );
 
   const variacoesProduto = variacoes.filter(
@@ -2516,7 +2518,25 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
     }
   }
 
+  function voltarInicioPeliculas() {
+    setCategoria("Películas");
+    setTela("estoque");
+    setProdutoAbertoId(null);
+    setAbrirGaleria(false);
+    setMostrarCadastroPelicula(false);
+    setProdutoPeliculaId(null);
+    setMostrarProduto(false);
+    setMostrarVariacao(false);
+    setRascunhos({});
+    setMarcaPeliculas("Todas");
+    setTipoPeliculas("");
+    setBuscaPeliculas("");
+    window.scrollTo(0, 0);
+  }
+
   function mudarCategoria(c: Categoria) {
+    if (c === "Películas") { voltarInicioPeliculas(); return; }
+    setMostrarCadastroPelicula(false);
     setCategoria(c);
     setMarcaFiltro("");
     setBusca("");
@@ -2904,8 +2924,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
         setCategoria("Capas");
         navegar("estoque");
       } else if (funcao === "peliculas") {
-        setCategoria("Películas");
-        navegar("estoque");
+        voltarInicioPeliculas();
       } else if (funcao === "estoque") {
         setCategoria("Outros");
         navegar("estoque");
@@ -2974,8 +2993,19 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
 
             {categoria === "Películas" ? (
               <>
-                <h2 style={{ margin: "17px 0 12px", fontSize: 23 }}>Películas</h2>
+                {mostrarCadastroPelicula && (
+                  <Botao variante="secundario" disabled={ocupado} onClick={voltarInicioPeliculas} style={{ marginTop: 10, marginBottom: 10 }}>← Voltar para películas</Botao>
+                )}
+                <h2 style={{ margin: "17px 0 12px", fontSize: 23 }}>
+                  <button type="button" onClick={voltarInicioPeliculas} disabled={ocupado} style={{ background: "transparent", border: 0, color: "inherit", font: "inherit", cursor: "pointer", padding: 0 }}>Películas</button>
+                </h2>
                 <section style={S.card}>
+                  <Campo rotulo="Pesquisar película">
+                    <div style={{ position: "relative" }}>
+                      <span aria-hidden="true" style={{ position: "absolute", left: 12, top: 12 }}>🔎</span>
+                      <input type="search" style={{ ...S.input, paddingLeft: 42 }} value={buscaPeliculas} onChange={e => setBuscaPeliculas(e.target.value)} placeholder="Buscar modelo: iPhone 13, Note 17..." />
+                    </div>
+                  </Campo>
                   <Campo rotulo="1. Marca">
                     <select style={S.input} value={marcaPeliculas} onChange={e => setMarcaPeliculas(e.target.value)}>
                       <option value="Todas">Todas as marcas</option>
@@ -3449,6 +3479,7 @@ const [abrirGaleria, setAbrirGaleria] = useState(false);
 
 {tela === "estoque" && produtoAberto && !abrirGaleria && (
           <>
+            {produtoAberto.categoria === "Películas" && <Botao variante="secundario" onClick={voltarInicioPeliculas} style={{ marginBottom: 12 }}>← Voltar para películas</Botao>}
             <section
               style={{
                 ...S.card,
